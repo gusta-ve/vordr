@@ -1,0 +1,33 @@
+# Exemplo de configuração do Vordr.
+# Copie para ~/.config/vordr/config.toml (ou rode `vordr init`) e ajuste.
+#
+# IMPORTANTE: os hosts são apenas ALIASES do seu ~/.ssh/config.
+# Nenhum IP, usuário ou segredo deve ficar aqui — quem resolve isso é o SSH.
+
+[thresholds]
+warn_days = 14       # amarelo quando faltarem <= 14 dias para expirar
+critical_days = 7    # vermelho quando faltarem <= 7 dias
+
+[hosts.nexus]
+ssh = "nexus"                 # alias no ~/.ssh/config
+label = "Nexus"
+status_command = "nexus-status"
+
+  [hosts.nexus.billing]
+  provider = "Contabo"
+  expires = "2026-08-15"      # AAAA-MM-DD — próxima renovação/cobrança
+  cost = 6.99
+  currency = "USD"
+  cycle = "monthly"           # monthly | yearly
+
+[hosts.simplimei]
+ssh = "simplimei"
+label = "SimpliMei"
+status_command = "simplimei-status"
+
+  [hosts.simplimei.billing]
+  provider = "Vultr"
+  expires = "2026-07-30"
+  cost = 12.00
+  currency = "USD"
+  cycle = "monthly"

@@ -1,0 +1,28 @@
+# Configuração real do usuário — NUNCA versionar (pode conter datas/custos privados)
+config.toml
+/config.toml
+.config/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Ferramentas
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Editores / SO
+.vscode/
+.idea/
+*.swp
+.DS_Store
