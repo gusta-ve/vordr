@@ -192,6 +192,38 @@ def test_manual_cost_overrides_provider_api(monkeypatch, tmp_path):
     assert "EUR 4.99" in result.stdout
 
 
+def test_cost_autofills_from_vultr(monkeypatch, tmp_path):
+    from datetime import date
+
+    from vordr.providers import ServerBilling
+
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[hosts.simplimei]\nssh = "simplimei"\nlabel = "SimpliMei"\n'
+        '  [hosts.simplimei.server]\n  provider = "Vultr"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("VORDR_CONFIG", str(path))
+    monkeypatch.setenv("COLUMNS", "200")
+    _isolate_secrets(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.secrets, "get_token", lambda p: "tok" if p == "vultr" else None)
+    # label "SimpliMEI-Core-Production" casa com o alias "simplimei" por substring
+    monkeypatch.setattr(
+        cli.vultr,
+        "fetch_servers",
+        lambda token, timeout=15: {
+            "SimpliMEI-Core-Production": ServerBilling(
+                "SimpliMEI-Core-Production", date(2026, 5, 20), 48.0, 48.0, "USD"
+            )
+        },
+    )
+    result = runner.invoke(cli.app, ["cost", "simplimei"])
+    assert result.exit_code == 0
+    assert "2026-05-20" in result.stdout
+    assert "48.00" in result.stdout
+    assert "(API)" in result.stdout
+
+
 def test_cost_hints_when_provider_token_missing(monkeypatch, tmp_path):
     _provider_config(monkeypatch, tmp_path)
     monkeypatch.setattr(cli.secrets, "get_token", lambda p: None)

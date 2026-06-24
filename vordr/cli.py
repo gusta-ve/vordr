@@ -14,7 +14,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from . import __version__, hetzner, rdap, secrets, ssh
+from . import __version__, hetzner, providers, rdap, secrets, ssh, vultr
 from .config import Config, ConfigError, Host, config_path, load
 from .format import (
     days_left_label,
@@ -199,10 +199,11 @@ def secret_set(
     if not token:
         err_console.print("[red]token vazio.[/]")
         raise typer.Exit(1)
-    if provider == "hetzner":  # valida com uma leitura antes de gravar
+    client = _PROVIDER_CLIENTS.get(provider)
+    if client is not None:  # valida com uma leitura antes de gravar
         try:
-            hetzner.fetch_servers(token, timeout=15)
-        except hetzner.HetznerError as exc:
+            client.fetch_servers(token, timeout=15)
+        except providers.ProviderError as exc:
             err_console.print(f"[red]token rejeitado:[/] {exc}")
             raise typer.Exit(1) from exc
     path = secrets.set_token(provider, token)
@@ -457,7 +458,12 @@ def security(
 
 # provedores com cliente de API embutido. O valor MANUAL no config sempre vence
 # o que vem daqui — é o "caminho alternativo" para preços promocionais/legados.
-_API_PROVIDERS = {"hetzner"}
+# Guardamos o *módulo* (não a função) para que `.fetch_servers` seja resolvido em
+# tempo de chamada — testes conseguem fazer monkeypatch dele.
+_PROVIDER_CLIENTS = {
+    "hetzner": hetzner,
+    "vultr": vultr,
+}
 
 
 @dataclass
@@ -532,31 +538,30 @@ def _resolve_domain_expiries(
 
 def _fetch_provider_servers(
     hosts: list[Host], *, timeout: int
-) -> tuple[dict[str, dict[str, hetzner.ServerBilling]], list[str]]:
+) -> tuple[dict[str, dict[str, providers.ServerBilling]], list[str]]:
     """Lista os servidores na API de cada provedor referenciado. Devolve (dados, avisos)."""
-    servers: dict[str, dict[str, hetzner.ServerBilling]] = {}
+    servers: dict[str, dict[str, providers.ServerBilling]] = {}
     notes: list[str] = []
-    providers = {
+    referenced = {
         h.server.provider.lower()
         for h in hosts
-        if h.server.provider and h.server.provider.lower() in _API_PROVIDERS
+        if h.server.provider and h.server.provider.lower() in _PROVIDER_CLIENTS
     }
-    for prov in sorted(providers):
+    for prov in sorted(referenced):
         token = secrets.get_token(prov)
         if not token:
             notes.append(f"{prov}: sem token — rode `vordr secret set {prov}` para automatizar")
             continue
         try:
-            if prov == "hetzner":
-                servers[prov] = hetzner.fetch_servers(token, timeout=timeout)
-        except hetzner.HetznerError as exc:
+            servers[prov] = _PROVIDER_CLIENTS[prov].fetch_servers(token, timeout=timeout)
+        except providers.ProviderError as exc:
             notes.append(f"{prov}: {exc}")
     return servers, notes
 
 
 def _match_server(
-    host: Host, servers: dict[str, dict[str, hetzner.ServerBilling]]
-) -> hetzner.ServerBilling | None:
+    host: Host, servers: dict[str, dict[str, providers.ServerBilling]]
+) -> providers.ServerBilling | None:
     """Casa um host com seu servidor na API (por provider_server, alias, nome ou label)."""
     catalog = servers.get((host.server.provider or "").lower())
     if not catalog:
@@ -572,7 +577,7 @@ def _match_server(
 
 
 def _resolve_lifecycle(
-    host: Host, sb: hetzner.ServerBilling | None, dom_expiry: date | None, today: date
+    host: Host, sb: providers.ServerBilling | None, dom_expiry: date | None, today: date
 ) -> _Lifecycle:
     srv = host.server
     since, since_auto = srv.since, False

@@ -11,35 +11,15 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
-from datetime import date, datetime
+
+from .providers import ProviderError, ServerBilling, parse_api_date, to_amount
 
 API_URL = "https://api.hetzner.cloud/v1/servers"
 DEFAULT_TIMEOUT = 15
 
 
-class HetznerError(RuntimeError):
+class HetznerError(ProviderError):
     """Falha ao falar com a API da Hetzner (token inválido, rede, etc.)."""
-
-
-@dataclass
-class ServerBilling:
-    """Dados de cobrança de um servidor, vindos da API."""
-
-    name: str
-    created: date | None = None
-    cost_net: float | None = None
-    cost_gross: float | None = None
-    currency: str = "EUR"  # Hetzner fatura em EUR
-
-
-def _parse_created(raw: object) -> date | None:
-    if not isinstance(raw, str):
-        return None
-    try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00")).date()
-    except ValueError:
-        return None
 
 
 def _monthly_price(server: dict) -> tuple[float | None, float | None]:
@@ -51,14 +31,7 @@ def _monthly_price(server: dict) -> tuple[float | None, float | None]:
     if chosen is None and prices:
         chosen = prices[0]
     pm = (chosen or {}).get("price_monthly", {})
-
-    def _num(value: object) -> float | None:
-        try:
-            return round(float(value), 2) if value is not None else None
-        except (TypeError, ValueError):
-            return None
-
-    return _num(pm.get("net")), _num(pm.get("gross"))
+    return to_amount(pm.get("net")), to_amount(pm.get("gross"))
 
 
 def parse_servers(payload: dict) -> dict[str, ServerBilling]:
@@ -70,9 +43,10 @@ def parse_servers(payload: dict) -> dict[str, ServerBilling]:
         net, gross = _monthly_price(server)
         result[name] = ServerBilling(
             name=name,
-            created=_parse_created(server.get("created")),
+            created=parse_api_date(server.get("created")),
             cost_net=net,
             cost_gross=gross,
+            currency="EUR",  # Hetzner fatura em EUR
         )
     return result
 

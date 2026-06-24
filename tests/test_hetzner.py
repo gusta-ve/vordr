@@ -31,8 +31,8 @@ def test_parse_servers_picks_location_price():
 
 
 def test_parse_created_bad():
-    assert hetzner._parse_created(None) is None
-    assert hetzner._parse_created("not-a-date") is None
+    assert hetzner.parse_api_date(None) is None
+    assert hetzner.parse_api_date("not-a-date") is None
 
 
 def test_parse_servers_skips_nameless():

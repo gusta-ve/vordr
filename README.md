@@ -126,15 +126,18 @@ vence** (útil para preços promocionais/legados):
 
 - **Domínio:** informe só `name` no `[hosts.X.domain]` e a expiração vem do **RDAP**
   (público, sem credencial), cacheada em `~/.cache/vordr/rdap.json`.
-- **Servidor:** com `provider = "Hetzner"` e um token (`vordr secret set hetzner`),
-  o `since` (data de criação) e o **custo mensal** vêm da **API do provedor**.
+- **Servidor:** com `provider = "Hetzner"` ou `"Vultr"` e um token configurado, o
+  `since` (data de criação) e o **custo mensal** vêm da **API do provedor**.
 
-Tokens nunca ficam no repositório: são lidos de variável de ambiente (`HCLOUD_TOKEN`)
-ou de `~/.config/vordr/secrets.toml` (chmod 600, no `.gitignore`). O env tem
-prioridade. Valores vindos da rede aparecem marcados com `(API)` / `(RDAP)`.
+Provedores suportados: **Hetzner** (`HCLOUD_TOKEN`) e **Vultr** (`VULTR_API_KEY`).
+Tokens nunca ficam no repositório: são lidos de variável de ambiente ou de
+`~/.config/vordr/secrets.toml` (chmod 600, no `.gitignore`), com o env tendo
+prioridade. Configure com `vordr secret set <provedor>`. Valores vindos da rede
+aparecem marcados com `(API)` / `(RDAP)`.
 
-> ⚠️ O preço da API da Hetzner é o **preço de lista atual** do tipo de servidor — se
-> a sua conta tem um valor promocional/travado, informe `cost` no config (ele vence).
+> ⚠️ O preço da API é o **de lista** do tipo/plano — se a sua conta tem valor
+> promocional/travado, informe `cost` no config (ele vence). A API da **Vultr** usa
+> allowlist de IP e o token é *full-access* (não há read-only): cuide bem dele.
 
 ## Como funciona
 
