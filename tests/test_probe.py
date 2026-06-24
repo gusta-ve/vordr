@@ -11,7 +11,7 @@ def test_parse_kv_handles_repeats_and_blank_lines():
 
 
 SYSTEM_SAMPLE = """\
-HOSTNAME=ubuntu-nexus
+HOSTNAME=web-01
 UPTIME_SECONDS=1814400
 LOADAVG=0.28 0.08 0.02
 CPUS=2
@@ -31,9 +31,9 @@ def test_probe_system_parses_sample(monkeypatch):
     monkeypatch.setattr(
         ssh, "run", lambda *a, **k: ssh.SSHResult(0, SYSTEM_SAMPLE, "")
     )
-    m = probe.probe_system("nexus")
+    m = probe.probe_system("web")
     assert m.reachable
-    assert m.hostname == "ubuntu-nexus"
+    assert m.hostname == "web-01"
     assert m.cpus == 2
     assert m.loadavg == (0.28, 0.08, 0.02)
     assert m.load_per_cpu == 0.14
@@ -44,10 +44,10 @@ def test_probe_system_parses_sample(monkeypatch):
 
 def test_probe_system_unreachable(monkeypatch):
     def boom(*a, **k):
-        raise ssh.SSHError("timeout (20s) ao contatar 'nexus'")
+        raise ssh.SSHError("timeout (20s) ao contatar 'web'")
 
     monkeypatch.setattr(ssh, "run", boom)
-    m = probe.probe_system("nexus")
+    m = probe.probe_system("web")
     assert not m.reachable
     assert "timeout" in (m.error or "")
 
@@ -56,7 +56,7 @@ def test_probe_system_nonzero_exit(monkeypatch):
     monkeypatch.setattr(
         ssh, "run", lambda *a, **k: ssh.SSHResult(255, "", "Permission denied (publickey).")
     )
-    m = probe.probe_system("nexus")
+    m = probe.probe_system("web")
     assert not m.reachable
     assert "Permission denied" in (m.error or "")
 
@@ -76,7 +76,7 @@ def test_probe_security_parses_sample(monkeypatch):
     monkeypatch.setattr(
         ssh, "run", lambda *a, **k: ssh.SSHResult(0, SECURITY_SAMPLE, "")
     )
-    s = probe.probe_security("nexus")
+    s = probe.probe_security("web")
     assert s.reachable
     assert s.users_now == 2
     assert s.failed_logins == 137

@@ -8,25 +8,24 @@
 warn_days = 14       # amarelo quando faltarem <= 14 dias para expirar
 critical_days = 7    # vermelho quando faltarem <= 7 dias
 
-[hosts.nexus]
-ssh = "nexus"                 # alias no ~/.ssh/config
-label = "Nexus"
-status_command = "nexus-status"
+[hosts.web]
+ssh = "web"                   # alias no ~/.ssh/config
+label = "Web"
+# status_command = "meu-status"   # opcional: seu script p/ `vordr status --raw`
 
-  [hosts.nexus.billing]
-  provider = "Contabo"
+  [hosts.web.billing]
+  provider = "Hetzner"
   expires = "2026-08-15"      # AAAA-MM-DD — próxima renovação/cobrança
   cost = 6.99
   currency = "USD"
   cycle = "monthly"           # monthly | yearly
 
-[hosts.simplimei]
-ssh = "simplimei"
-label = "SimpliMei"
-status_command = "simplimei-status"
+[hosts.db]
+ssh = "db"
+label = "DB"
 
-  [hosts.simplimei.billing]
-  provider = "Vultr"
+  [hosts.db.billing]
+  provider = "DigitalOcean"
   expires = "2026-07-30"
   cost = 12.00
   currency = "USD"

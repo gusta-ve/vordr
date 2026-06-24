@@ -1,8 +1,8 @@
 """Camada de transporte: executa comandos nos hosts via SSH.
 
 Vordr nunca guarda IPs nem credenciais. Ele apoia-se inteiramente no seu
-`~/.ssh/config` — os hosts são referenciados por *alias* (ex.: ``nexus``,
-``simplimei``). Toda a autenticação é delegada ao SSH (chave, agent, etc.).
+`~/.ssh/config` — os hosts são referenciados por *alias* (ex.: ``web``,
+``db``). Toda a autenticação é delegada ao SSH (chave, agent, etc.).
 """
 
 from __future__ import annotations
@@ -84,8 +84,8 @@ def run(
 def run_passthrough(alias: str, command: str, *, timeout: int = DEFAULT_TIMEOUT) -> int:
     """Executa ``command`` herdando o terminal (mantém cores/ANSI nativos).
 
-    Usado pelo modo ``--raw``, que apenas reproduz a saída original de
-    ``nexus-status`` / ``simplimei-status`` tal como ela é no servidor.
+    Usado pelo modo ``--raw``, que apenas reproduz a saída original do
+    ``status_command`` configurado do host, tal como ela é no servidor.
     """
     if not ssh_available():
         raise SSHError("binário 'ssh' não encontrado no PATH")

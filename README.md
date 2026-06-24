@@ -22,24 +22,24 @@ Vordr só precisa do seu `~/.ssh/config`.
 ├───────────┬──────────┬─────────┬──────┬─────┬───────┬────────┬─────────┤
 │ host      │ estado   │ uptime  │ load │ ram │ disco │ docker │ expira  │
 ├───────────┼──────────┼─────────┼──────┼─────┼───────┼────────┼─────────┤
-│ Nexus     │ ● online │ 2sem 5d │ 0.28 │ 32% │ 22%   │ 5/6    │ 53d     │
-│ SimpliMei │ ● online │ 4sem 4d │ 0.04 │ 18% │ 62%   │ 6/6    │ 6d  ⚠   │
+│ web       │ ● online │ 2sem 5d │ 0.28 │ 32% │ 22%   │ 5/6    │ 53d     │
+│ db        │ ● online │ 4sem 4d │ 0.04 │ 18% │ 62%   │ 6/6    │ 6d  ⚠   │
 └───────────┴──────────┴─────────┴──────┴─────┴───────┴────────┴─────────┘
 ```
 
 ## Por que existe
 
-Eu mantenho dois servidores (`nexus` e `simplimei`) e já tinha scripts de status
-rodando neles (`nexus-status`, `simplimei-status`). Faltava uma camada por cima que:
+Quem mantém alguns servidores acaba acumulando comandos soltos e logins repetidos
+para responder perguntas simples. Vordr junta isso numa camada única que:
 
-1. olhasse **todos os hosts de uma vez**, com métricas comparáveis e coloridas por
+1. olha **todos os hosts de uma vez**, com métricas comparáveis e coloridas por
    limiar (load por CPU, % de disco/RAM);
-2. me avisasse **antes** de uma renovação cobrar de novo;
-3. desse uma **auditoria rápida de segurança** sem eu precisar logar em cada máquina.
+2. avisa **antes** de uma renovação cobrar de novo;
+3. dá uma **auditoria rápida de segurança** sem precisar logar em cada máquina.
 
 Vordr coleta métricas via pequenos scripts `sh` que emitem `CHAVE=valor` (estável e
-testável) em vez de tentar parsear a saída colorida dos scripts existentes — mas
-ainda assim oferece um modo `--raw` que reproduz a saída nativa deles.
+testável) em vez de parsear saída colorida e frágil — mas ainda oferece um modo
+`--raw` que reproduz a saída nativa de um `status_command` seu, quando você define um.
 
 ## Instalação
 
@@ -66,29 +66,30 @@ vordr init        # cria ~/.config/vordr/config.toml comentado
 warn_days = 14
 critical_days = 7
 
-[hosts.nexus]
-ssh = "nexus"                 # alias no ~/.ssh/config
-label = "Nexus"
-status_command = "nexus-status"
+[hosts.web]
+ssh = "web"                   # alias no ~/.ssh/config
+label = "Web"
+# status_command = "meu-status"   # opcional: seu script para `vordr status --raw`
 
-  [hosts.nexus.billing]
-  provider = "Contabo"
+  [hosts.web.billing]
+  provider = "Hetzner"
   expires = "2026-08-15"      # AAAA-MM-DD
   cost = 6.99
   currency = "USD"
   cycle = "monthly"           # monthly | yearly
 ```
 
-Sem arquivo de configuração, Vordr já assume `nexus` e `simplimei` por padrão — o
-`status` funciona de imediato; só o `cost` precisa que você preencha as datas.
+Vordr não embute nenhum host: `vordr init` cria um `config.toml` comentado para você
+preencher com seus aliases. Sem hosts configurados, os comandos apenas orientam a
+rodar `vordr init`.
 
 ## Uso
 
 ```bash
 vordr status              # painel de todos os hosts
-vordr status nexus        # só um host
+vordr status web          # só um host
 vordr status --watch 5    # atualiza a cada 5s (tela cheia)
-vordr status --raw        # saída nativa do nexus-status/simplimei-status
+vordr status --raw        # saída nativa do status_command do host
 
 vordr resources           # CPU/load, memória e disco em detalhe
 vordr security            # auditoria: logins, falhas, portas, fail2ban, updates
@@ -105,7 +106,7 @@ para disco/RAM, load por CPU e dias até a cobrança.
 |-------------------|--------------------|----------------------------------------------------|
 | Transporte SSH    | `vordr/ssh.py`     | Executa comandos remotos (`BatchMode`, timeout).   |
 | Coleta de métrica | `vordr/probe.py`   | Scripts `sh` → `CHAVE=valor` → dataclasses.        |
-| Configuração      | `vordr/config.py`  | TOML + padrões embutidos; cálculo de dias/custo.   |
+| Configuração      | `vordr/config.py`  | Lê o TOML; cálculo de dias/custo.                  |
 | Formatação        | `vordr/format.py`  | Funções puras (uptime, bytes, limiares de cor).    |
 | CLI               | `vordr/cli.py`     | Typer + Rich; orquestra tudo em paralelo.          |
 

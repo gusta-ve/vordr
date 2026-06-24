@@ -1,7 +1,7 @@
 """Coleta de métricas estruturadas dos hosts.
 
-Em vez de tentar parsear a saída colorida do ``nexus-status`` (frágil, cheia de
-ANSI), Vordr roda pequenos scripts ``sh`` portáveis no servidor que emitem
+Em vez de tentar parsear a saída colorida de um script de status existente
+(frágil, cheia de ANSI), Vordr roda pequenos scripts ``sh`` portáveis no servidor que emitem
 linhas ``CHAVE=valor``. Isso é estável, fácil de testar e permite aplicar
 limiares (load alto, disco cheio, etc.).
 """

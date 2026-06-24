@@ -1,8 +1,8 @@
 """Configuração do Vordr.
 
 A configuração vive em ``~/.config/vordr/config.toml`` (ou em ``$VORDR_CONFIG``).
-Se nenhum arquivo existir, Vordr cai em valores padrão sensatos para os hosts
-``nexus`` e ``simplimei`` — assim o ``status`` funciona de imediato, sem setup.
+Você descreve quais hosts monitorar; rode ``vordr init`` para gerar um arquivo
+comentado de exemplo. Sem hosts configurados não há o que vigiar.
 
 Nada de IPs nem segredos aqui: os hosts são apenas *aliases* do seu SSH config.
 Datas de cobrança/expiração são informadas por você, pois não há como o servidor
@@ -77,23 +77,7 @@ class Config:
             raise ConfigError(f"host '{name}' não configurado. Conhecidos: {known}") from None
 
 
-# --- defaults --------------------------------------------------------------
-
-_DEFAULT_HOSTS = {
-    "nexus": Host(name="nexus", ssh="nexus", label="Nexus", status_command="nexus-status"),
-    "simplimei": Host(
-        name="simplimei",
-        ssh="simplimei",
-        label="SimpliMei",
-        status_command="simplimei-status",
-    ),
-}
-
-
-def default_config() -> Config:
-    """Configuração embutida usada quando não há arquivo no disco."""
-    return Config(hosts=dict(_DEFAULT_HOSTS))
-
+# --- paths -----------------------------------------------------------------
 
 def config_path() -> Path:
     env = os.environ.get("VORDR_CONFIG")
@@ -151,8 +135,6 @@ def parse(data: dict, *, source: Path | None = None) -> Config:
         raise ConfigError("seção [hosts] inválida")
 
     hosts = {name: _parse_host(name, raw) for name, raw in hosts_raw.items()}
-    if not hosts:
-        hosts = dict(_DEFAULT_HOSTS)
 
     thresholds = data.get("thresholds", {})
     return Config(
@@ -167,7 +149,7 @@ def load(path: Path | None = None) -> Config:
     """Carrega a configuração do disco; usa os padrões embutidos se não existir."""
     path = path or config_path()
     if not path.exists():
-        return default_config()
+        return Config(hosts={})
     try:
         with path.open("rb") as fh:
             data = tomllib.load(fh)

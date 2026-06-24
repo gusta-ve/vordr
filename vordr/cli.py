@@ -46,25 +46,24 @@ CONFIG_TEMPLATE = """\
 warn_days = 14       # avisa (amarelo) quando faltar <= esta qtd de dias
 critical_days = 7    # alerta (vermelho) quando faltar <= esta qtd de dias
 
-[hosts.nexus]
-ssh = "nexus"                 # alias no ~/.ssh/config
-label = "Nexus"
-status_command = "nexus-status"
+[hosts.web]
+ssh = "web"                   # alias no ~/.ssh/config
+label = "Web"
+# status_command = "meu-status"   # opcional: seu script p/ `vordr status --raw`
 
-  [hosts.nexus.billing]
-  provider = "Contabo"
+  [hosts.web.billing]
+  provider = "Hetzner"
   expires = "2026-08-15"      # AAAA-MM-DD — próxima renovação/expiração
   cost = 6.99
   currency = "USD"
   cycle = "monthly"           # monthly | yearly
 
-[hosts.simplimei]
-ssh = "simplimei"
-label = "SimpliMei"
-status_command = "simplimei-status"
+[hosts.db]
+ssh = "db"
+label = "DB"
 
-  [hosts.simplimei.billing]
-  provider = "Vultr"
+  [hosts.db.billing]
+  provider = "DigitalOcean"
   expires = "2026-07-30"
   cost = 12.00
   currency = "USD"
@@ -74,12 +73,19 @@ status_command = "simplimei-status"
 
 # --- helpers ---------------------------------------------------------------
 
-def _load_config() -> Config:
+def _load_config(*, require_hosts: bool = True) -> Config:
     try:
-        return load()
+        config = load()
     except ConfigError as exc:
         err_console.print(f"[bold red]erro de configuração:[/] {exc}")
         raise typer.Exit(2) from exc
+    if require_hosts and not config.hosts:
+        console.print(
+            "[yellow]Nenhum host configurado.[/] Rode [bold]vordr init[/] e edite "
+            f"{config.source or config_path()}."
+        )
+        raise typer.Exit(0)
+    return config
 
 
 def _select_hosts(config: Config, host: str | None) -> list[Host]:
@@ -133,10 +139,7 @@ def hosts() -> None:
             b.expires.isoformat() if b.expires else "—",
         )
     console.print(table)
-    src = config.source
-    console.print(
-        f"[dim]fonte: {src if src else 'padrões embutidos (rode `vordr init`)'}[/dim]"
-    )
+    console.print(f"[dim]fonte: {config.source or config_path()}[/dim]")
 
 
 @app.command()
@@ -220,7 +223,7 @@ def _build_status_table(
 def status(
     host: str = typer.Argument(None, help="Host específico (padrão: todos)."),
     raw: bool = typer.Option(
-        False, "--raw", help="Mostra a saída nativa de nexus-status/simplimei-status."
+        False, "--raw", help="Mostra a saída nativa do status_command do host."
     ),
     watch: float = typer.Option(
         0, "--watch", "-w", help="Atualiza a cada N segundos (0 = uma vez)."

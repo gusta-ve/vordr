@@ -5,16 +5,9 @@ import pytest
 from vordr import config as cfg
 
 
-def test_default_config_has_known_hosts():
-    c = cfg.default_config()
-    assert set(c.hosts) == {"nexus", "simplimei"}
-    assert c.hosts["nexus"].ssh == "nexus"
-    assert c.hosts["nexus"].status_command == "nexus-status"
-
-
-def test_load_missing_file_falls_back_to_defaults(tmp_path):
+def test_load_missing_file_returns_empty(tmp_path):
     c = cfg.load(tmp_path / "nope.toml")
-    assert "nexus" in c.hosts
+    assert c.hosts == {}
     assert c.source is None
 
 
@@ -68,14 +61,14 @@ def test_invalid_date_raises():
 
 
 def test_unknown_host_raises():
-    c = cfg.default_config()
+    c = cfg.parse({"hosts": {"box": {}}})
     with pytest.raises(cfg.ConfigError):
         c.host("inexistente")
 
 
-def test_empty_hosts_falls_back_to_defaults():
+def test_empty_hosts_stays_empty():
     c = cfg.parse({"hosts": {}})
-    assert "nexus" in c.hosts
+    assert c.hosts == {}
 
 
 def test_load_reads_toml_file(tmp_path):
