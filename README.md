@@ -109,11 +109,32 @@ vordr resources           # CPU/load, memória e disco em detalhe
 vordr security            # auditoria: logins, falhas, portas, fail2ban, updates
 vordr cost                # tabela: hospedagem, renovação de servidor/domínio, custo/mês
 vordr cost web            # painel detalhado do ciclo de vida de um host
+vordr cost --offline      # sem rede: usa só o que está no config
 vordr hosts               # lista o que está configurado
+
+vordr secret set hetzner  # guarda o token da API (chmod 600, fora do repo)
+vordr secret status       # mostra quais provedores têm token (mascarado)
 ```
 
 Todas as cores seguem limiares: verde (ok), amarelo (atenção), vermelho (crítico) —
 para disco/RAM, load por CPU e dias até a cobrança.
+
+## Automação do `cost` (sem digitar datas)
+
+O `cost` preenche sozinho o que você não informou — **e o valor do config sempre
+vence** (útil para preços promocionais/legados):
+
+- **Domínio:** informe só `name` no `[hosts.X.domain]` e a expiração vem do **RDAP**
+  (público, sem credencial), cacheada em `~/.cache/vordr/rdap.json`.
+- **Servidor:** com `provider = "Hetzner"` e um token (`vordr secret set hetzner`),
+  o `since` (data de criação) e o **custo mensal** vêm da **API do provedor**.
+
+Tokens nunca ficam no repositório: são lidos de variável de ambiente (`HCLOUD_TOKEN`)
+ou de `~/.config/vordr/secrets.toml` (chmod 600, no `.gitignore`). O env tem
+prioridade. Valores vindos da rede aparecem marcados com `(API)` / `(RDAP)`.
+
+> ⚠️ O preço da API da Hetzner é o **preço de lista atual** do tipo de servidor — se
+> a sua conta tem um valor promocional/travado, informe `cost` no config (ele vence).
 
 ## Como funciona
 
@@ -122,6 +143,9 @@ para disco/RAM, load por CPU e dias até a cobrança.
 | Transporte SSH    | `vordr/ssh.py`     | Executa comandos remotos (`BatchMode`, timeout).   |
 | Coleta de métrica | `vordr/probe.py`   | Scripts `sh` → `CHAVE=valor` → dataclasses.        |
 | Configuração      | `vordr/config.py`  | Lê o TOML; cálculo de dias/custo.                  |
+| Expiração domínio | `vordr/rdap.py`    | RDAP público + cache em disco (sem credencial).    |
+| API de provedor   | `vordr/hetzner.py` | Cliente read-only da Hetzner (since + preço).      |
+| Segredos          | `vordr/secrets.py` | Tokens fora do repo (env > arquivo chmod 600).     |
 | Formatação        | `vordr/format.py`  | Funções puras (uptime, bytes, limiares de cor).    |
 | CLI               | `vordr/cli.py`     | Typer + Rich; orquestra tudo em paralelo.          |
 

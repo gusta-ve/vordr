@@ -3,6 +3,10 @@ config.toml
 /config.toml
 .config/
 
+# Segredos (tokens de API) — NUNCA versionar
+secrets.toml
+/secrets.toml
+
 # Python
 __pycache__/
 *.py[cod]

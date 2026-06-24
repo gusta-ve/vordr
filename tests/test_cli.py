@@ -40,6 +40,13 @@ label = "DB"
 """
 
 
+def _isolate_secrets(monkeypatch, tmp_path):
+    """Garante que os testes não leiam tokens reais do ambiente nem do home."""
+    monkeypatch.setenv("VORDR_SECRETS", str(tmp_path / "secrets.toml"))
+    monkeypatch.delenv("HCLOUD_TOKEN", raising=False)
+    monkeypatch.delenv("VULTR_API_KEY", raising=False)
+
+
 def _write_config(monkeypatch, tmp_path):
     """Escreve um config genérico e aponta o Vordr para ele (sem tocar no do usuário)."""
     path = tmp_path / "config.toml"
@@ -47,6 +54,7 @@ def _write_config(monkeypatch, tmp_path):
     monkeypatch.setenv("VORDR_CONFIG", str(path))
     # evita o rich truncar colunas na largura padrão (80) fora de um terminal
     monkeypatch.setenv("COLUMNS", "200")
+    _isolate_secrets(monkeypatch, tmp_path)
     return path
 
 
@@ -130,6 +138,102 @@ def test_cost_offline_skips_rdap(monkeypatch, tmp_path):
     monkeypatch.setattr(cli.rdap, "domain_expiry", boom)
     result = runner.invoke(cli.app, ["cost", "--offline"])
     assert result.exit_code == 0
+
+
+def _provider_config(monkeypatch, tmp_path, *, manual_cost=False):
+    cost_line = "  cost = 4.99\n  currency = \"EUR\"\n" if manual_cost else ""
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[hosts.box]\nssh = "box"\nlabel = "Box"\n'
+        '  [hosts.box.server]\n  provider = "Hetzner"\n'
+        '  provider_server = "ubuntu-box"\n' + cost_line,
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("VORDR_CONFIG", str(path))
+    monkeypatch.setenv("COLUMNS", "200")
+    _isolate_secrets(monkeypatch, tmp_path)
+
+
+def _fake_hetzner(created, net, gross):
+    from vordr.hetzner import ServerBilling
+
+    def fetch(token, timeout=15):
+        return {"ubuntu-box": ServerBilling("ubuntu-box", created, net, gross, "EUR")}
+
+    return fetch
+
+
+def test_cost_autofills_from_provider_api(monkeypatch, tmp_path):
+    from datetime import date
+
+    _provider_config(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.secrets, "get_token", lambda p: "tok" if p == "hetzner" else None)
+    monkeypatch.setattr(cli.hetzner, "fetch_servers", _fake_hetzner(date(2025, 1, 1), 6.49, 6.49))
+
+    result = runner.invoke(cli.app, ["cost", "box"])
+    assert result.exit_code == 0
+    out = result.stdout
+    assert "2025-01-01" in out      # since veio da API
+    assert "6.49" in out            # custo veio da API
+    assert "(API)" in out           # marcado como automático
+
+
+def test_manual_cost_overrides_provider_api(monkeypatch, tmp_path):
+    from datetime import date
+
+    _provider_config(monkeypatch, tmp_path, manual_cost=True)
+    monkeypatch.setattr(cli.secrets, "get_token", lambda p: "tok" if p == "hetzner" else None)
+    monkeypatch.setattr(cli.hetzner, "fetch_servers", _fake_hetzner(date(2025, 1, 1), 6.49, 6.49))
+
+    result = runner.invoke(cli.app, ["cost"])
+    assert result.exit_code == 0
+    # o valor manual (4.99) vence o da API (6.49)
+    assert "4.99" in result.stdout
+    assert "EUR 4.99" in result.stdout
+
+
+def test_cost_hints_when_provider_token_missing(monkeypatch, tmp_path):
+    _provider_config(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.secrets, "get_token", lambda p: None)
+
+    def boom(token, timeout=15):
+        raise AssertionError("não deveria chamar a API sem token")
+
+    monkeypatch.setattr(cli.hetzner, "fetch_servers", boom)
+    result = runner.invoke(cli.app, ["cost", "box"])
+    assert result.exit_code == 0
+    assert "secret set hetzner" in result.stdout
+
+
+def test_secret_status(monkeypatch, tmp_path):
+    _isolate_secrets(monkeypatch, tmp_path)
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setenv("HCLOUD_TOKEN", "abcd1234efgh5678")
+    result = runner.invoke(cli.app, ["secret", "status"])
+    assert result.exit_code == 0
+    assert "hetzner" in result.stdout
+    assert "abcd…5678" in result.stdout     # mascarado
+    assert "abcd1234efgh5678" not in result.stdout
+
+
+def test_secret_set_validates_and_writes(monkeypatch, tmp_path):
+    _isolate_secrets(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.hetzner, "fetch_servers", lambda token, timeout=15: {})
+    result = runner.invoke(cli.app, ["secret", "set", "hetzner"], input="my-secret-token\n")
+    assert result.exit_code == 0
+    saved = (tmp_path / "secrets.toml").read_text()
+    assert "my-secret-token" in saved
+    # arquivo gravado com permissão 600
+    import stat
+
+    mode = (tmp_path / "secrets.toml").stat().st_mode
+    assert stat.S_IMODE(mode) == 0o600
+
+
+def test_secret_set_unknown_provider(monkeypatch, tmp_path):
+    _isolate_secrets(monkeypatch, tmp_path)
+    result = runner.invoke(cli.app, ["secret", "set", "aws"], input="x\n")
+    assert result.exit_code == 2
 
 
 def test_init_creates_config(monkeypatch, tmp_path):

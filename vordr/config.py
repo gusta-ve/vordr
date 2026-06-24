@@ -35,6 +35,7 @@ class Subscription:
     currency: str = "USD"
     cycle: str = "monthly"  # monthly | yearly
     provider: str | None = None  # provedor (servidor) ou registrar (domínio)
+    provider_ref: str | None = None  # nome/id do servidor na API do provedor
     name: str | None = None  # nome do domínio (só faz sentido no domínio)
     since: date | None = None  # desde quando você mantém (tempo de hospedagem)
 
@@ -130,6 +131,7 @@ def _parse_subscription(raw: dict, ctx: str, *, is_domain: bool = False) -> Subs
         cycle=raw.get("cycle", "monthly"),
         # domínio usa "registrar"; servidor usa "provider".
         provider=raw.get("registrar") if is_domain else raw.get("provider"),
+        provider_ref=None if is_domain else raw.get("provider_server"),
         name=raw.get("name") if is_domain else None,
         since=None if is_domain else _parse_date(raw.get("since"), f"{ctx}.since"),
     )

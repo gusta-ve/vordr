@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import date
 
 import typer
@@ -13,8 +14,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from . import __version__, rdap, ssh
-from .config import Config, ConfigError, Host, Subscription, config_path, load
+from . import __version__, hetzner, rdap, secrets, ssh
+from .config import Config, ConfigError, Host, config_path, load
 from .format import (
     days_left_label,
     days_left_style,
@@ -57,8 +58,9 @@ label = "Web"
 # status_command = "meu-status"   # opcional: seu script p/ `vordr status --raw`
 
   [hosts.web.server]
-  provider = "Hetzner"
-  since   = "2024-03-01"      # desde quando você hospeda aqui (tempo de hospedagem)
+  provider = "Hetzner"        # com token (vordr secret set hetzner), since/custo
+  # provider_server = "web-01"  # nome do servidor na API, se != do alias
+  since   = "2024-03-01"      # vêm da API; o que você puser aqui sempre vence.
   expires = "2026-08-15"      # AAAA-MM-DD — próxima renovação do servidor
   cost = 6.99
   currency = "USD"
@@ -172,6 +174,63 @@ def init(
     path.write_text(CONFIG_TEMPLATE, encoding="utf-8")
     console.print(f"[green]✔[/] configuração criada em [bold]{path}[/]")
     console.print("[dim]edite as datas de cobrança e rode `vordr cost`.[/dim]")
+
+
+secret_app = typer.Typer(
+    help="Gerencia tokens de API de provedores — guardados fora do repositório.",
+    no_args_is_help=True,
+)
+app.add_typer(secret_app, name="secret")
+
+
+@secret_app.command("set")
+def secret_set(
+    provider: str = typer.Argument(..., help=f"Um de: {', '.join(secrets.ENV_VARS)}."),
+) -> None:
+    """Salva (e valida) o token de API de um provedor em ~/.config/vordr/secrets.toml."""
+    provider = provider.lower()
+    if provider not in secrets.ENV_VARS:
+        err_console.print(
+            f"[red]provedor desconhecido:[/] {provider} "
+            f"(conhecidos: {', '.join(secrets.ENV_VARS)})"
+        )
+        raise typer.Exit(2)
+    token = typer.prompt(f"Token da API ({provider})", hide_input=True).strip()
+    if not token:
+        err_console.print("[red]token vazio.[/]")
+        raise typer.Exit(1)
+    if provider == "hetzner":  # valida com uma leitura antes de gravar
+        try:
+            hetzner.fetch_servers(token, timeout=15)
+        except hetzner.HetznerError as exc:
+            err_console.print(f"[red]token rejeitado:[/] {exc}")
+            raise typer.Exit(1) from exc
+    path = secrets.set_token(provider, token)
+    console.print(f"[green]✔[/] token de [bold]{provider}[/] salvo em [bold]{path}[/] (chmod 600)")
+    console.print(
+        f"[dim]a variável de ambiente {secrets.ENV_VARS[provider]} tem prioridade "
+        f"sobre o arquivo, se definida.[/dim]"
+    )
+
+
+@secret_app.command("status")
+def secret_status() -> None:
+    """Mostra quais provedores têm token configurado (sem revelá-lo)."""
+    table = Table(title="Tokens de API", title_style="bold cyan")
+    table.add_column("provedor", style="bold")
+    table.add_column("fonte")
+    table.add_column("token")
+    labels = {"env": None, "file": "arquivo"}
+    for prov in sorted(secrets.ENV_VARS):
+        src = secrets.token_source(prov)
+        tok = secrets.get_token(prov)
+        source = f"env ({secrets.ENV_VARS[prov]})" if src == "env" else labels.get(src) or "—"
+        table.add_row(
+            prov,
+            source,
+            secrets.mask(tok) if tok else Text("não configurado", style="dim"),
+        )
+    console.print(table)
 
 
 def _build_status_table(
@@ -394,22 +453,42 @@ def security(
                             border_style=border))
 
 
-def _monthly_by_currency(host: Host) -> dict[str, float]:
-    """Soma o custo mensal de servidor + domínio, agrupado por moeda."""
-    totals: dict[str, float] = {}
-    for sub in (host.server, host.domain):
-        if sub is None:
-            continue
-        monthly = sub.monthly_cost
-        if monthly is not None:
-            totals[sub.currency] = round(totals.get(sub.currency, 0.0) + monthly, 2)
-    return totals
+# --- ciclo de vida: resolve config (manual) > API do provedor > RDAP ----------
+
+# provedores com cliente de API embutido. O valor MANUAL no config sempre vence
+# o que vem daqui — é o "caminho alternativo" para preços promocionais/legados.
+_API_PROVIDERS = {"hetzner"}
+
+
+@dataclass
+class _Lifecycle:
+    """Valores efetivos de um host após mesclar config, API do provedor e RDAP."""
+
+    since: date | None = None
+    since_auto: bool = False
+    cost: float | None = None  # custo mensal do servidor (normalizado)
+    cost_net: float | None = None  # net, quando difere do cobrado (via API)
+    currency: str = "USD"
+    cost_auto: bool = False
+    domain_expiry: date | None = None
+    domain_expiry_auto: bool = False
 
 
 def _money(totals: dict[str, float]) -> str:
     if not totals:
         return "—"
     return " + ".join(f"{cur} {val:.2f}" for cur, val in sorted(totals.items()))
+
+
+def _monthly_by_currency(host: Host, lc: _Lifecycle) -> dict[str, float]:
+    """Custo mensal de servidor + domínio (servidor pode vir da API), por moeda."""
+    totals: dict[str, float] = {}
+    if lc.cost is not None:
+        totals[lc.currency] = round(totals.get(lc.currency, 0.0) + lc.cost, 2)
+    dom = host.domain
+    if dom is not None and dom.monthly_cost is not None:
+        totals[dom.currency] = round(totals.get(dom.currency, 0.0) + dom.monthly_cost, 2)
+    return totals
 
 
 def _renewal_cell(
@@ -424,17 +503,6 @@ def _renewal_cell(
         days_left_label(days) + suffix,
         style=days_left_style(days, warn=config.warn_days, critical=config.critical_days),
     )
-
-
-def _resolve_domain_expiry(dom: Subscription | None, *, offline: bool, timeout: int) -> date | None:
-    """Expiração efetiva do domínio: o que está no config vence; senão, RDAP."""
-    if dom is None:
-        return None
-    if dom.expires is not None:
-        return dom.expires
-    if dom.name and not offline:
-        return rdap.domain_expiry(dom.name, timeout=timeout)
-    return None
 
 
 def _resolve_domain_expiries(
@@ -462,8 +530,73 @@ def _resolve_domain_expiries(
     return resolved
 
 
+def _fetch_provider_servers(
+    hosts: list[Host], *, timeout: int
+) -> tuple[dict[str, dict[str, hetzner.ServerBilling]], list[str]]:
+    """Lista os servidores na API de cada provedor referenciado. Devolve (dados, avisos)."""
+    servers: dict[str, dict[str, hetzner.ServerBilling]] = {}
+    notes: list[str] = []
+    providers = {
+        h.server.provider.lower()
+        for h in hosts
+        if h.server.provider and h.server.provider.lower() in _API_PROVIDERS
+    }
+    for prov in sorted(providers):
+        token = secrets.get_token(prov)
+        if not token:
+            notes.append(f"{prov}: sem token — rode `vordr secret set {prov}` para automatizar")
+            continue
+        try:
+            if prov == "hetzner":
+                servers[prov] = hetzner.fetch_servers(token, timeout=timeout)
+        except hetzner.HetznerError as exc:
+            notes.append(f"{prov}: {exc}")
+    return servers, notes
+
+
+def _match_server(
+    host: Host, servers: dict[str, dict[str, hetzner.ServerBilling]]
+) -> hetzner.ServerBilling | None:
+    """Casa um host com seu servidor na API (por provider_server, alias, nome ou label)."""
+    catalog = servers.get((host.server.provider or "").lower())
+    if not catalog:
+        return None
+    for ref in (host.server.provider_ref, host.ssh, host.name, host.label):
+        if not ref:
+            continue
+        low = ref.lower()
+        for name, billing in catalog.items():
+            if low == name.lower() or low in name.lower():
+                return billing
+    return None
+
+
+def _resolve_lifecycle(
+    host: Host, sb: hetzner.ServerBilling | None, dom_expiry: date | None, today: date
+) -> _Lifecycle:
+    srv = host.server
+    since, since_auto = srv.since, False
+    if since is None and sb is not None and sb.created is not None:
+        since, since_auto = sb.created, True
+
+    cost, currency, cost_net, cost_auto = srv.monthly_cost, srv.currency, None, False
+    if cost is None and sb is not None and sb.cost_gross is not None:
+        cost = sb.cost_gross
+        cost_net = sb.cost_net if sb.cost_net != sb.cost_gross else None
+        currency = sb.currency
+        cost_auto = True
+
+    dom = host.domain
+    dom_auto = dom is not None and dom.expires is None and dom_expiry is not None
+    return _Lifecycle(since, since_auto, cost, cost_net, currency, cost_auto, dom_expiry, dom_auto)
+
+
+def _age_text(lc: _Lifecycle, today: date) -> str:
+    return human_age((today - lc.since).days) if lc.since else "—"
+
+
 def _cost_table(
-    hosts: list[Host], config: Config, today: date, dom_expiries: dict[str, date | None]
+    hosts: list[Host], config: Config, today: date, lifecycles: dict[str, _Lifecycle]
 ) -> Table:
     table = Table(title="Vordr · custo & ciclo de vida", title_style="bold cyan")
     table.add_column("host", style="bold")
@@ -473,37 +606,46 @@ def _cost_table(
     table.add_column("domínio")
     table.add_column("custo/mês", justify="right")
     for host in hosts:
+        lc = lifecycles[host.name]
         dom = host.domain
         dom_has = dom is not None and (dom.has_data or bool(dom.name))
         table.add_row(
             host.display,
             host.server.provider or "—",
-            human_age(host.server.age_days(today)),
+            _age_text(lc, today),
             _renewal_cell(host.server.expires, host.server.has_data, config, today),
-            _renewal_cell(dom_expiries.get(host.name), dom_has, config, today),
-            _money(_monthly_by_currency(host)),
+            _renewal_cell(lc.domain_expiry, dom_has, config, today),
+            _money(_monthly_by_currency(host, lc)),
         )
     return table
 
 
-def _cost_panel(host: Host, config: Config, today: date, dom_expiry: date | None) -> Panel:
+def _cost_panel(host: Host, config: Config, today: date, lc: _Lifecycle) -> Panel:
     srv, dom = host.server, host.domain
     table = Table(show_header=False, box=None, pad_edge=False)
     table.add_column("k", style="dim")
     table.add_column("v")
 
     table.add_row("provedor", srv.provider or "—")
-    age = human_age(srv.age_days(today))
-    since = f"  (desde {srv.since.isoformat()})" if srv.since else ""
-    table.add_row("hospedando há", f"{age}{since}" if age != "—" else "—")
+    age_line = Text(_age_text(lc, today))
+    if lc.since:
+        age_line.append(f"  (desde {lc.since.isoformat()})", style="dim")
+        if lc.since_auto:
+            age_line.append("  (API)", style="dim italic")
+    table.add_row("hospedando há", age_line)
 
     table.add_row("servidor renova", _renewal_cell(srv.expires, srv.has_data, config, today))
-    if srv.cost is not None:
-        table.add_row("", Text(f"{srv.currency} {srv.cost:.2f} / {srv.cycle}", style="dim"))
+    if lc.cost is not None:
+        money = Text(f"{lc.currency} {lc.cost:.2f} / mês", style="dim")
+        if lc.cost_auto:
+            money.append("  (API)", style="dim italic")
+        table.add_row("", money)
+        if lc.cost_net is not None:
+            table.add_row("", Text(f"líquido {lc.currency} {lc.cost_net:.2f}", style="dim"))
 
-    if dom is not None and (dom_expiry is not None or dom.has_data or dom.name):
-        cell = _renewal_cell(dom_expiry, dom.has_data or bool(dom.name), config, today)
-        if dom.expires is None and dom_expiry is not None:
+    if dom is not None and (lc.domain_expiry is not None or dom.has_data or dom.name):
+        cell = _renewal_cell(lc.domain_expiry, dom.has_data or bool(dom.name), config, today)
+        if lc.domain_expiry_auto:
             cell.append("  (RDAP)", style="dim italic")
         table.add_row("domínio expira", cell)
         detail = " · ".join(p for p in (dom.name, dom.provider) if p)
@@ -514,7 +656,7 @@ def _cost_panel(host: Host, config: Config, today: date, dom_expiry: date | None
     else:
         table.add_row("domínio", Text("não configurado", style="dim"))
 
-    table.add_row("custo/mês", Text(_money(_monthly_by_currency(host)), style="bold"))
+    table.add_row("custo/mês", Text(_money(_monthly_by_currency(host, lc)), style="bold"))
     return Panel(table, title=f"[bold cyan]{host.display}[/]", border_style="cyan")
 
 
@@ -524,50 +666,62 @@ def cost(
         None, help="Host específico → painel detalhado (padrão: tabela de todos)."
     ),
     offline: bool = typer.Option(
-        False, "--offline", help="Não consultar RDAP; usa só o que está no config."
+        False, "--offline", help="Não consultar rede (RDAP/API); usa só o config."
     ),
     timeout: int = typer.Option(
-        rdap.DEFAULT_TIMEOUT, help="Timeout das consultas RDAP de domínio (s)."
+        rdap.DEFAULT_TIMEOUT, help="Timeout das consultas de rede — RDAP e API (s)."
     ),
 ) -> None:
     """Custo & ciclo de vida: hospedagem, renovação do servidor e do domínio.
 
-    A expiração do domínio é buscada automaticamente via RDAP quando você informa
-    apenas o ``name`` (sem ``expires``) no config. Use ``--offline`` para pular a rede.
+    Os valores do config sempre vencem. O que faltar é buscado automaticamente:
+    custo/``since`` na API do provedor (precisa de token — ``vordr secret set``) e a
+    expiração do domínio via RDAP. Use ``--offline`` para pular a rede.
     """
     config = _load_config()
     selected = _select_hosts(config, host)
     today = date.today()
 
+    servers: dict[str, dict[str, hetzner.ServerBilling]] = {}
+    notes: list[str] = []
+    if not offline:
+        servers, notes = _fetch_provider_servers(selected, timeout=timeout)
+    dom_exp = _resolve_domain_expiries(selected, offline=offline, timeout=timeout)
+    lifecycles = {
+        h.name: _resolve_lifecycle(h, _match_server(h, servers), dom_exp.get(h.name), today)
+        for h in selected
+    }
+
     if host:
-        dom_expiry = _resolve_domain_expiry(selected[0].domain, offline=offline, timeout=timeout)
-        console.print(_cost_panel(selected[0], config, today, dom_expiry))
-        return
+        console.print(_cost_panel(selected[0], config, today, lifecycles[selected[0].name]))
+    else:
+        console.print(_cost_table(selected, config, today, lifecycles))
 
-    expiries = _resolve_domain_expiries(selected, offline=offline, timeout=timeout)
-    console.print(_cost_table(selected, config, today, expiries))
+        totals: dict[str, float] = {}
+        missing: list[str] = []
+        for h in selected:
+            lc = lifecycles[h.name]
+            for cur, val in _monthly_by_currency(h, lc).items():
+                totals[cur] = round(totals.get(cur, 0.0) + val, 2)
+            has_any = (
+                lc.cost is not None
+                or lc.since is not None
+                or lc.domain_expiry is not None
+                or (h.domain is not None and h.domain.has_data)
+            )
+            if not has_any:
+                missing.append(h.display)
 
-    totals: dict[str, float] = {}
-    missing: list[str] = []
-    for h in selected:
-        for cur, val in _monthly_by_currency(h).items():
-            totals[cur] = round(totals.get(cur, 0.0) + val, 2)
-        has_any = (
-            h.server.has_data
-            or (h.domain is not None and h.domain.has_data)
-            or expiries.get(h.name) is not None
-        )
-        if not has_any:
-            missing.append(h.display)
+        if totals:
+            console.print(f"[bold]total mensal estimado:[/] {_money(totals)}")
+        if missing:
+            console.print(
+                f"[dim]sem dados de cobrança: {', '.join(missing)} — "
+                f"edite {config.source or config_path()} (ou rode `vordr init`).[/dim]"
+            )
 
-    if totals:
-        console.print(f"[bold]total mensal estimado:[/] {_money(totals)}")
-
-    if missing:
-        console.print(
-            f"[dim]sem dados de cobrança: {', '.join(missing)} — "
-            f"edite {config.source or config_path()} (ou rode `vordr init`).[/dim]"
-        )
+    for note in notes:
+        console.print(f"[dim yellow]{note}[/]")
 
 
 def _version_callback(value: bool) -> None:

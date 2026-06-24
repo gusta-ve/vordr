@@ -18,8 +18,9 @@ label = "Web"
 # status_command = "meu-status"   # opcional: seu script p/ `vordr status --raw`
 
   [hosts.web.server]
-  provider = "Hetzner"
-  since   = "2024-03-01"      # desde quando você hospeda aqui (tempo de hospedagem)
+  provider = "Hetzner"        # com token (vordr secret set hetzner), since e custo
+  # provider_server = "web-01"  # nome do servidor na API, se != do alias
+  since   = "2024-03-01"      # vêm da API; o que você puser aqui sempre vence.
   expires = "2026-08-15"      # AAAA-MM-DD — próxima renovação do servidor
   cost = 6.99
   currency = "USD"
