@@ -11,9 +11,32 @@ _SAMPLE_CONFIG = """\
 ssh = "web"
 label = "Web"
 
+  [hosts.web.server]
+  provider = "Hetzner"
+  since = "2024-03-01"
+  expires = "2026-08-15"
+  cost = 6.99
+  currency = "USD"
+  cycle = "monthly"
+
+  [hosts.web.domain]
+  name = "web.example.com"
+  registrar = "Cloudflare"
+  expires = "2027-03-01"
+  cost = 12.00
+  currency = "USD"
+  cycle = "yearly"
+
 [hosts.db]
 ssh = "db"
 label = "DB"
+
+  [hosts.db.server]
+  provider = "DigitalOcean"
+  expires = "2026-07-30"
+  cost = 12.00
+  currency = "USD"
+  cycle = "monthly"
 """
 
 
@@ -22,6 +45,8 @@ def _write_config(monkeypatch, tmp_path):
     path = tmp_path / "config.toml"
     path.write_text(_SAMPLE_CONFIG, encoding="utf-8")
     monkeypatch.setenv("VORDR_CONFIG", str(path))
+    # evita o rich truncar colunas na largura padrão (80) fora de um terminal
+    monkeypatch.setenv("COLUMNS", "200")
     return path
 
 
@@ -46,11 +71,65 @@ def test_no_config_shows_init_hint(monkeypatch, tmp_path):
     assert "nenhum host" in result.stdout.lower()
 
 
-def test_cost_runs_without_ssh(monkeypatch, tmp_path):
+def test_cost_table_lists_providers_and_total(monkeypatch, tmp_path):
     _write_config(monkeypatch, tmp_path)
     result = runner.invoke(cli.app, ["cost"])
     assert result.exit_code == 0
-    assert "custo" in result.stdout.lower()
+    out = result.stdout.lower()
+    assert "custo" in out
+    assert "hetzner" in out
+    assert "total mensal" in out
+
+
+def test_cost_panel_for_single_host(monkeypatch, tmp_path):
+    _write_config(monkeypatch, tmp_path)
+    result = runner.invoke(cli.app, ["cost", "web"])
+    assert result.exit_code == 0
+    out = result.stdout.lower()
+    assert "hospedando há" in out
+    assert "domínio" in out
+    assert "cloudflare" in out
+
+
+def test_cost_fetches_domain_via_rdap_when_only_name(monkeypatch, tmp_path):
+    from datetime import date
+
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[hosts.web]\nssh = "web"\n[hosts.web.domain]\nname = "web.example.com"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("VORDR_CONFIG", str(path))
+    monkeypatch.setenv("COLUMNS", "200")
+    called = {"name": None}
+
+    def fake_expiry(name, timeout=10):
+        called["name"] = name
+        return date(2030, 1, 1)
+
+    monkeypatch.setattr(cli.rdap, "domain_expiry", fake_expiry)
+    result = runner.invoke(cli.app, ["cost", "web"])
+    assert result.exit_code == 0
+    assert called["name"] == "web.example.com"
+    assert "2030-01-01" in result.stdout
+    assert "rdap" in result.stdout.lower()
+
+
+def test_cost_offline_skips_rdap(monkeypatch, tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[hosts.web]\nssh = "web"\n[hosts.web.domain]\nname = "web.example.com"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("VORDR_CONFIG", str(path))
+    monkeypatch.setenv("COLUMNS", "200")
+
+    def boom(name, timeout=10):
+        raise AssertionError("não deveria consultar RDAP no modo offline")
+
+    monkeypatch.setattr(cli.rdap, "domain_expiry", boom)
+    result = runner.invoke(cli.app, ["cost", "--offline"])
+    assert result.exit_code == 0
 
 
 def test_init_creates_config(monkeypatch, tmp_path):

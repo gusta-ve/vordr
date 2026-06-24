@@ -8,8 +8,9 @@
 perguntas que importam no dia a dia:
 
 - **Estão de pé?** — estado, uptime, carga, RAM, disco e containers de todos os hosts.
-- **Vou ser cobrado?** — quantos dias faltam para cada servidor/serviço expirar e
-  quanto você gasta por mês. _O recurso que evita a cobrança surpresa._
+- **Vou ser cobrado?** — há quanto tempo você hospeda cada host, quando o
+  **servidor** renova e quando o **domínio** expira, e quanto você gasta por mês.
+  _O recurso que evita a cobrança surpresa._
 - **Estão seguros?** — falhas de login, portas em escuta, fail2ban, atualizações
   pendentes e necessidade de reboot.
 
@@ -55,7 +56,11 @@ pip install -e ".[dev]"
 
 Os hosts são **aliases do seu `~/.ssh/config`** — nenhum IP, usuário ou chave fica
 guardado pelo Vordr. As datas de cobrança são informadas por você (o servidor não tem
-como saber quando o provedor vai cobrar de novo).
+como saber quando o provedor ou o registrar vão cobrar de novo).
+
+Cada host tem dois blocos opcionais de ciclo de vida: `[hosts.X.server]` (a
+hospedagem) e `[hosts.X.domain]` (o domínio). Ambos com `expires`/`cost`, somados no
+custo mensal.
 
 ```bash
 vordr init        # cria ~/.config/vordr/config.toml comentado
@@ -71,12 +76,21 @@ ssh = "web"                   # alias no ~/.ssh/config
 label = "Web"
 # status_command = "meu-status"   # opcional: seu script para `vordr status --raw`
 
-  [hosts.web.billing]
+  [hosts.web.server]          # a hospedagem
   provider = "Hetzner"
-  expires = "2026-08-15"      # AAAA-MM-DD
+  since   = "2024-03-01"      # desde quando você hospeda (tempo de hospedagem)
+  expires = "2026-08-15"      # AAAA-MM-DD — próxima renovação do servidor
   cost = 6.99
   currency = "USD"
   cycle = "monthly"           # monthly | yearly
+
+  [hosts.web.domain]          # o domínio (opcional)
+  name = "web.exemplo.com"
+  registrar = "Cloudflare"
+  expires = "2027-03-01"
+  cost = 12.00
+  currency = "USD"
+  cycle = "yearly"
 ```
 
 Vordr não embute nenhum host: `vordr init` cria um `config.toml` comentado para você
@@ -93,7 +107,8 @@ vordr status --raw        # saída nativa do status_command do host
 
 vordr resources           # CPU/load, memória e disco em detalhe
 vordr security            # auditoria: logins, falhas, portas, fail2ban, updates
-vordr cost                # dias até expirar + gasto mensal estimado
+vordr cost                # tabela: hospedagem, renovação de servidor/domínio, custo/mês
+vordr cost web            # painel detalhado do ciclo de vida de um host
 vordr hosts               # lista o que está configurado
 ```
 

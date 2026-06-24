@@ -23,20 +23,33 @@ class ConfigError(RuntimeError):
 
 
 @dataclass
-class Billing:
-    """Informações de cobrança/expiração de um host (preenchidas por você)."""
+class Subscription:
+    """Uma assinatura com renovação/expiração (servidor ou domínio).
+
+    Os campos são preenchidos por você no ``config.toml`` — o servidor não tem
+    como saber quando o provedor ou o registrar vão cobrar de novo.
+    """
 
     expires: date | None = None
     cost: float | None = None
     currency: str = "USD"
     cycle: str = "monthly"  # monthly | yearly
-    provider: str | None = None
+    provider: str | None = None  # provedor (servidor) ou registrar (domínio)
+    name: str | None = None  # nome do domínio (só faz sentido no domínio)
+    since: date | None = None  # desde quando você mantém (tempo de hospedagem)
 
     def days_left(self, today: date | None = None) -> int | None:
         if self.expires is None:
             return None
         today = today or date.today()
         return (self.expires - today).days
+
+    def age_days(self, today: date | None = None) -> int | None:
+        """Dias decorridos desde ``since`` (ex.: tempo de hospedagem)."""
+        if self.since is None:
+            return None
+        today = today or date.today()
+        return (today - self.since).days
 
     @property
     def monthly_cost(self) -> float | None:
@@ -45,6 +58,10 @@ class Billing:
         if self.cycle == "yearly":
             return round(self.cost / 12, 2)
         return self.cost
+
+    @property
+    def has_data(self) -> bool:
+        return self.expires is not None or self.cost is not None
 
 
 @dataclass
@@ -55,7 +72,8 @@ class Host:
     ssh: str
     label: str | None = None
     status_command: str | None = None
-    billing: Billing = field(default_factory=Billing)
+    server: Subscription = field(default_factory=Subscription)
+    domain: Subscription | None = None
 
     @property
     def display(self) -> str:
@@ -102,13 +120,18 @@ def _parse_date(value: object, ctx: str) -> date | None:
     raise ConfigError(f"{ctx}: data inválida '{value!r}'")
 
 
-def _parse_billing(raw: dict, ctx: str) -> Billing:
-    return Billing(
+def _parse_subscription(raw: dict, ctx: str, *, is_domain: bool = False) -> Subscription:
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{ctx} deve ser uma tabela")
+    return Subscription(
         expires=_parse_date(raw.get("expires"), f"{ctx}.expires"),
         cost=raw.get("cost"),
         currency=raw.get("currency", "USD"),
         cycle=raw.get("cycle", "monthly"),
-        provider=raw.get("provider"),
+        # domínio usa "registrar"; servidor usa "provider".
+        provider=raw.get("registrar") if is_domain else raw.get("provider"),
+        name=raw.get("name") if is_domain else None,
+        since=None if is_domain else _parse_date(raw.get("since"), f"{ctx}.since"),
     )
 
 
@@ -116,15 +139,20 @@ def _parse_host(name: str, raw: dict) -> Host:
     if not isinstance(raw, dict):
         raise ConfigError(f"host '{name}' deve ser uma tabela [hosts.{name}]")
     ssh_alias = raw.get("ssh", name)
-    billing_raw = raw.get("billing", {})
-    if not isinstance(billing_raw, dict):
-        raise ConfigError(f"hosts.{name}.billing deve ser uma tabela")
+    # [hosts.X.server] é o nome atual; aceitamos [hosts.X.billing] por compat.
+    server_raw = raw.get("server", raw.get("billing", {}))
+    domain_raw = raw.get("domain")
     return Host(
         name=name,
         ssh=ssh_alias,
         label=raw.get("label"),
         status_command=raw.get("status_command"),
-        billing=_parse_billing(billing_raw, f"hosts.{name}.billing"),
+        server=_parse_subscription(server_raw, f"hosts.{name}.server"),
+        domain=(
+            _parse_subscription(domain_raw, f"hosts.{name}.domain", is_domain=True)
+            if domain_raw is not None
+            else None
+        ),
     )
 
 

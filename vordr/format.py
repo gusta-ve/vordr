@@ -26,6 +26,22 @@ def human_uptime(seconds: int | None) -> str:
     return " ".join(parts[:3])
 
 
+def human_age(days: int | None) -> str:
+    """Formata uma duração em dias como ``1a 3m`` (tempo de hospedagem/domínio)."""
+    if days is None or days < 0:
+        return "—"
+    years, rem = divmod(days, 365)
+    months = rem // 30
+    parts = []
+    if years:
+        parts.append(f"{years}a")
+    if months:
+        parts.append(f"{months}m")
+    if not parts:  # menos de um mês: mostra os dias
+        parts.append(f"{days}d")
+    return " ".join(parts)
+
+
 def human_kb(kilobytes: int | None) -> str:
     """Formata KiB como string legível (MiB/GiB/TiB)."""
     if kilobytes is None:

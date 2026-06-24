@@ -13,11 +13,12 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from . import __version__, ssh
-from .config import Config, ConfigError, Host, config_path, load
+from . import __version__, rdap, ssh
+from .config import Config, ConfigError, Host, Subscription, config_path, load
 from .format import (
     days_left_label,
     days_left_style,
+    human_age,
     human_kb,
     human_uptime,
     load_style,
@@ -40,7 +41,11 @@ CONFIG_TEMPLATE = """\
 #
 # Os hosts são apenas ALIASES do seu ~/.ssh/config. Nenhum IP ou segredo aqui.
 # As datas de cobrança/expiração são informadas por você (o servidor não sabe
-# quando o provedor vai cobrar de novo).
+# quando o provedor ou o registrar vão cobrar de novo).
+#
+# Cada host tem dois blocos opcionais de ciclo de vida:
+#   [hosts.X.server]  — a hospedagem (provedor, desde quando, renovação, custo)
+#   [hosts.X.domain]  — o domínio    (registrar, expiração, custo)
 
 [thresholds]
 warn_days = 14       # avisa (amarelo) quando faltar <= esta qtd de dias
@@ -51,19 +56,29 @@ ssh = "web"                   # alias no ~/.ssh/config
 label = "Web"
 # status_command = "meu-status"   # opcional: seu script p/ `vordr status --raw`
 
-  [hosts.web.billing]
+  [hosts.web.server]
   provider = "Hetzner"
-  expires = "2026-08-15"      # AAAA-MM-DD — próxima renovação/expiração
+  since   = "2024-03-01"      # desde quando você hospeda aqui (tempo de hospedagem)
+  expires = "2026-08-15"      # AAAA-MM-DD — próxima renovação do servidor
   cost = 6.99
   currency = "USD"
   cycle = "monthly"           # monthly | yearly
+
+  [hosts.web.domain]
+  name = "web.exemplo.com"
+  registrar = "Cloudflare"
+  expires = "2027-03-01"      # quando o domínio expira
+  cost = 12.00
+  currency = "USD"
+  cycle = "yearly"
 
 [hosts.db]
 ssh = "db"
 label = "DB"
 
-  [hosts.db.billing]
+  [hosts.db.server]
   provider = "DigitalOcean"
+  since   = "2025-01-10"
   expires = "2026-07-30"
   cost = 12.00
   currency = "USD"
@@ -130,13 +145,13 @@ def hosts() -> None:
     table.add_column("provedor")
     table.add_column("expira")
     for h in config.hosts.values():
-        b = h.billing
+        s = h.server
         table.add_row(
             h.display,
             h.ssh,
             h.status_command or "—",
-            b.provider or "—",
-            b.expires.isoformat() if b.expires else "—",
+            s.provider or "—",
+            s.expires.isoformat() if s.expires else "—",
         )
     console.print(table)
     console.print(f"[dim]fonte: {config.source or config_path()}[/dim]")
@@ -174,8 +189,7 @@ def _build_status_table(
 
     for name, host in config.hosts.items():
         m = metrics[name]
-        billing = host.billing
-        days = billing.days_left(today)
+        days = host.server.days_left(today)
 
         if not m.reachable:
             table.add_row(
@@ -380,53 +394,174 @@ def security(
                             border_style=border))
 
 
-@app.command()
-def cost(
-    timeout: int = typer.Option(0, hidden=True),  # cost não faz SSH
-) -> None:
-    """Custo e expiração: dias até a próxima cobrança e gasto mensal estimado."""
-    config = _load_config()
-    today = date.today()
+def _monthly_by_currency(host: Host) -> dict[str, float]:
+    """Soma o custo mensal de servidor + domínio, agrupado por moeda."""
+    totals: dict[str, float] = {}
+    for sub in (host.server, host.domain):
+        if sub is None:
+            continue
+        monthly = sub.monthly_cost
+        if monthly is not None:
+            totals[sub.currency] = round(totals.get(sub.currency, 0.0) + monthly, 2)
+    return totals
 
-    table = Table(title="Vordr · custo & expiração", title_style="bold cyan")
+
+def _money(totals: dict[str, float]) -> str:
+    if not totals:
+        return "—"
+    return " + ".join(f"{cur} {val:.2f}" for cur, val in sorted(totals.items()))
+
+
+def _renewal_cell(
+    expires: date | None, has_data: bool, config: Config, today: date
+) -> Text:
+    """Célula 'faltam Xd  AAAA-MM-DD' colorida por limiar (ou '—')."""
+    if expires is None and not has_data:
+        return Text("—", style="dim")
+    days = (expires - today).days if expires else None
+    suffix = f"  {expires.isoformat()}" if expires else ""
+    return Text(
+        days_left_label(days) + suffix,
+        style=days_left_style(days, warn=config.warn_days, critical=config.critical_days),
+    )
+
+
+def _resolve_domain_expiry(dom: Subscription | None, *, offline: bool, timeout: int) -> date | None:
+    """Expiração efetiva do domínio: o que está no config vence; senão, RDAP."""
+    if dom is None:
+        return None
+    if dom.expires is not None:
+        return dom.expires
+    if dom.name and not offline:
+        return rdap.domain_expiry(dom.name, timeout=timeout)
+    return None
+
+
+def _resolve_domain_expiries(
+    hosts: list[Host], *, offline: bool, timeout: int
+) -> dict[str, date | None]:
+    """Resolve a expiração de domínio de vários hosts (RDAP em paralelo)."""
+    resolved: dict[str, date | None] = {}
+    pending: list[Host] = []
+    for h in hosts:
+        if h.domain is not None and h.domain.expires is not None:
+            resolved[h.name] = h.domain.expires
+        elif h.domain is not None and h.domain.name and not offline:
+            resolved[h.name] = None  # placeholder; será preenchido pelo RDAP
+            pending.append(h)
+        else:
+            resolved[h.name] = None
+    if pending:
+        with ThreadPoolExecutor(max_workers=min(8, len(pending))) as pool:
+            futures = {
+                pool.submit(rdap.domain_expiry, h.domain.name, timeout=timeout): h.name
+                for h in pending
+            }
+            for future in futures:
+                resolved[futures[future]] = future.result()
+    return resolved
+
+
+def _cost_table(
+    hosts: list[Host], config: Config, today: date, dom_expiries: dict[str, date | None]
+) -> Table:
+    table = Table(title="Vordr · custo & ciclo de vida", title_style="bold cyan")
     table.add_column("host", style="bold")
     table.add_column("provedor")
-    table.add_column("expira em")
-    table.add_column("data")
-    table.add_column("ciclo")
+    table.add_column("hospedando há")
+    table.add_column("servidor")
+    table.add_column("domínio")
     table.add_column("custo/mês", justify="right")
-
-    total_monthly = 0.0
-    totals_by_currency: dict[str, float] = {}
-    missing: list[str] = []
-
-    for host in config.hosts.values():
-        b = host.billing
-        days = b.days_left(today)
-        if b.expires is None and b.cost is None:
-            missing.append(host.display)
-        monthly = b.monthly_cost
-        if monthly is not None:
-            totals_by_currency[b.currency] = totals_by_currency.get(b.currency, 0.0) + monthly
-            total_monthly += monthly
-
-        cost_txt = f"{b.currency} {monthly:.2f}" if monthly is not None else "—"
+    for host in hosts:
+        dom = host.domain
+        dom_has = dom is not None and (dom.has_data or bool(dom.name))
         table.add_row(
             host.display,
-            b.provider or "—",
-            Text(days_left_label(days),
-                 style=days_left_style(days, warn=config.warn_days,
-                                       critical=config.critical_days)),
-            b.expires.isoformat() if b.expires else "—",
-            b.cycle,
-            cost_txt,
+            host.server.provider or "—",
+            human_age(host.server.age_days(today)),
+            _renewal_cell(host.server.expires, host.server.has_data, config, today),
+            _renewal_cell(dom_expiries.get(host.name), dom_has, config, today),
+            _money(_monthly_by_currency(host)),
         )
+    return table
 
-    console.print(table)
 
-    if totals_by_currency:
-        parts = [f"{cur} {val:.2f}" for cur, val in sorted(totals_by_currency.items())]
-        console.print(f"[bold]total mensal estimado:[/] {' + '.join(parts)}")
+def _cost_panel(host: Host, config: Config, today: date, dom_expiry: date | None) -> Panel:
+    srv, dom = host.server, host.domain
+    table = Table(show_header=False, box=None, pad_edge=False)
+    table.add_column("k", style="dim")
+    table.add_column("v")
+
+    table.add_row("provedor", srv.provider or "—")
+    age = human_age(srv.age_days(today))
+    since = f"  (desde {srv.since.isoformat()})" if srv.since else ""
+    table.add_row("hospedando há", f"{age}{since}" if age != "—" else "—")
+
+    table.add_row("servidor renova", _renewal_cell(srv.expires, srv.has_data, config, today))
+    if srv.cost is not None:
+        table.add_row("", Text(f"{srv.currency} {srv.cost:.2f} / {srv.cycle}", style="dim"))
+
+    if dom is not None and (dom_expiry is not None or dom.has_data or dom.name):
+        cell = _renewal_cell(dom_expiry, dom.has_data or bool(dom.name), config, today)
+        if dom.expires is None and dom_expiry is not None:
+            cell.append("  (RDAP)", style="dim italic")
+        table.add_row("domínio expira", cell)
+        detail = " · ".join(p for p in (dom.name, dom.provider) if p)
+        if detail:
+            table.add_row("", Text(detail, style="dim"))
+        if dom.cost is not None:
+            table.add_row("", Text(f"{dom.currency} {dom.cost:.2f} / {dom.cycle}", style="dim"))
+    else:
+        table.add_row("domínio", Text("não configurado", style="dim"))
+
+    table.add_row("custo/mês", Text(_money(_monthly_by_currency(host)), style="bold"))
+    return Panel(table, title=f"[bold cyan]{host.display}[/]", border_style="cyan")
+
+
+@app.command()
+def cost(
+    host: str = typer.Argument(
+        None, help="Host específico → painel detalhado (padrão: tabela de todos)."
+    ),
+    offline: bool = typer.Option(
+        False, "--offline", help="Não consultar RDAP; usa só o que está no config."
+    ),
+    timeout: int = typer.Option(
+        rdap.DEFAULT_TIMEOUT, help="Timeout das consultas RDAP de domínio (s)."
+    ),
+) -> None:
+    """Custo & ciclo de vida: hospedagem, renovação do servidor e do domínio.
+
+    A expiração do domínio é buscada automaticamente via RDAP quando você informa
+    apenas o ``name`` (sem ``expires``) no config. Use ``--offline`` para pular a rede.
+    """
+    config = _load_config()
+    selected = _select_hosts(config, host)
+    today = date.today()
+
+    if host:
+        dom_expiry = _resolve_domain_expiry(selected[0].domain, offline=offline, timeout=timeout)
+        console.print(_cost_panel(selected[0], config, today, dom_expiry))
+        return
+
+    expiries = _resolve_domain_expiries(selected, offline=offline, timeout=timeout)
+    console.print(_cost_table(selected, config, today, expiries))
+
+    totals: dict[str, float] = {}
+    missing: list[str] = []
+    for h in selected:
+        for cur, val in _monthly_by_currency(h).items():
+            totals[cur] = round(totals.get(cur, 0.0) + val, 2)
+        has_any = (
+            h.server.has_data
+            or (h.domain is not None and h.domain.has_data)
+            or expiries.get(h.name) is not None
+        )
+        if not has_any:
+            missing.append(h.display)
+
+    if totals:
+        console.print(f"[bold]total mensal estimado:[/] {_money(totals)}")
 
     if missing:
         console.print(

@@ -3,6 +3,10 @@
 #
 # IMPORTANTE: os hosts são apenas ALIASES do seu ~/.ssh/config.
 # Nenhum IP, usuário ou segredo deve ficar aqui — quem resolve isso é o SSH.
+#
+# Cada host tem dois blocos opcionais de ciclo de vida:
+#   [hosts.X.server]  — a hospedagem (provedor, desde quando, renovação, custo)
+#   [hosts.X.domain]  — o domínio    (registrar, expiração, custo)
 
 [thresholds]
 warn_days = 14       # amarelo quando faltarem <= 14 dias para expirar
@@ -13,19 +17,29 @@ ssh = "web"                   # alias no ~/.ssh/config
 label = "Web"
 # status_command = "meu-status"   # opcional: seu script p/ `vordr status --raw`
 
-  [hosts.web.billing]
+  [hosts.web.server]
   provider = "Hetzner"
-  expires = "2026-08-15"      # AAAA-MM-DD — próxima renovação/cobrança
+  since   = "2024-03-01"      # desde quando você hospeda aqui (tempo de hospedagem)
+  expires = "2026-08-15"      # AAAA-MM-DD — próxima renovação do servidor
   cost = 6.99
   currency = "USD"
   cycle = "monthly"           # monthly | yearly
+
+  [hosts.web.domain]
+  name = "web.exemplo.com"
+  registrar = "Cloudflare"
+  expires = "2027-03-01"      # quando o domínio expira
+  cost = 12.00
+  currency = "USD"
+  cycle = "yearly"
 
 [hosts.db]
 ssh = "db"
 label = "DB"
 
-  [hosts.db.billing]
+  [hosts.db.server]
   provider = "DigitalOcean"
+  since   = "2025-01-10"
   expires = "2026-07-30"
   cost = 12.00
   currency = "USD"

@@ -1,6 +1,7 @@
 from vordr.format import (
     days_left_label,
     days_left_style,
+    human_age,
     human_kb,
     human_uptime,
     load_style,
@@ -25,6 +26,15 @@ def test_human_kb():
     assert human_kb(512) == "512KB"
     assert human_kb(2048) == "2.0MB"
     assert human_kb(1024 * 1024) == "1.0GB"
+
+
+def test_human_age():
+    assert human_age(None) == "—"
+    assert human_age(-1) == "—"
+    assert human_age(10) == "10d"        # menos de um mês
+    assert human_age(60) == "2m"
+    assert human_age(365) == "1a"
+    assert human_age(365 + 90) == "1a 3m"
 
 
 def test_pct_style_thresholds():
