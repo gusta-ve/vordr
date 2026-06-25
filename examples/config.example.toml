@@ -1,0 +1,46 @@
+# Vordr configuration — full reference.
+# Copy to ~/.config/vordr/config.toml (or run `vordr init`).
+#
+# This file is OPTIONAL: with a token (`vordr secret set hetzner|vultr`) Vordr discovers
+# your servers on its own. Use it only for what the API can't know — a label, the SSH
+# alias (needed for `status`) or a pinned price (promo/legacy). Hosts are just ALIASES
+# from your ~/.ssh/config: no IP or secret here. What you write always wins over the API.
+
+# Optional — defaults are 14 / 7 days.
+[thresholds]
+warn_days = 14       # yellow when this many days or fewer remain
+critical_days = 7    # red when this many days or fewer remain
+
+# A fully-specified host (every field set by hand).
+[hosts.web]
+ssh = "web"                   # alias in ~/.ssh/config (use "" for a billing-only host)
+label = "Web"
+# status_command = "my-status"   # optional: your script for `vordr status --raw`
+
+  [hosts.web.server]
+  provider = "Hetzner"        # Hetzner | Vultr — enables automatic cost and since
+  provider_server = "web-01"  # the server's name in the API, if it differs from the alias
+  since   = "2024-03-01"      # since when you've hosted it (the API can fill this in)
+  expires = "2026-08-15"      # YYYY-MM-DD — next server renewal
+  cost = 6.99                 # pins the price (wins over the API's list price)
+  currency = "USD"
+  cycle = "monthly"           # monthly | yearly
+
+  [hosts.web.domain]
+  name = "web.example.com"
+  registrar = "Cloudflare"
+  expires = "2027-03-01"      # leave out and it comes from RDAP automatically
+  cost = 12.00
+  currency = "USD"
+  cycle = "yearly"
+
+# A minimal host — provider only. With a token, cost/since come from the API and the
+# domain expiry from RDAP; nothing else needs to be written.
+[hosts.db]
+ssh = "db"
+
+  [hosts.db.server]
+  provider = "Vultr"
+
+  [hosts.db.domain]
+  name = "db.example.com"

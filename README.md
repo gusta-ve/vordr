@@ -1,5 +1,9 @@
 # Vordr 🐺
 
+<p align="center">
+  <img src="docs/hero.svg" alt="vordr — the warden of your servers" width="900">
+</p>
+
 > _In Norse lore, the **Vörðr** is the guardian spirit that follows each person from
 > birth to death, watching without rest. Here, Vordr stands guard over your servers._
 
@@ -203,13 +207,15 @@ takes essentially the same time.
 ## Development
 
 ```bash
-pip install -e ".[dev]"
-ruff check .
-pytest
+make dev      # pip install -e ".[dev]"
+make lint     # ruff check .
+make test     # pytest -q
 ```
 
 The tests never touch the network: the SSH layer is injected (`monkeypatch`) and the
-parsing/formatting logic is tested against real samples of server output.
+parsing/formatting logic is tested against real samples of server output. A full sample
+config lives in [`examples/config.example.toml`](examples/config.example.toml); the
+README hero is regenerated with `python3 docs/make_hero.py`.
 
 ## License
 

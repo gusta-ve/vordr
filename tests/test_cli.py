@@ -86,7 +86,7 @@ def test_cost_table_lists_providers_and_total(monkeypatch, tmp_path):
     out = result.stdout.lower()
     assert "cost" in out
     assert "hetzner" in out
-    assert "monthly total" in out
+    assert "total" in out
 
 
 def test_cost_panel_for_single_host(monkeypatch, tmp_path):

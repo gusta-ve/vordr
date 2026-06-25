@@ -9,9 +9,8 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 
 import typer
-from rich.console import Console
+from rich.console import Group
 from rich.live import Live
-from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
@@ -27,6 +26,7 @@ from .format import (
     pct_style,
 )
 from .probe import SecurityMetrics, SystemMetrics, probe_security, probe_system
+from .ui import ACCENT, MUTED, brand, card, console, err_console, grid, indent, kv, meta
 
 app = typer.Typer(
     name="vordr",
@@ -35,8 +35,6 @@ app = typer.Typer(
     add_completion=False,
     context_settings={"help_option_names": ["-h", "--help"]},
 )
-console = Console()
-err_console = Console(stderr=True)
 
 CONFIG_TEMPLATE = """\
 # Vordr configuration — ~/.config/vordr/config.toml
@@ -123,6 +121,17 @@ def _state_text(reachable: bool, error: str | None) -> Text:
     return Text("● offline", style="bold red")
 
 
+def _print_host_card(
+    display: str, body, *, note: str | None = None, note_style: str = MUTED
+) -> None:
+    """A frameless per-host card: ``vordr · <host>`` title + indented body."""
+    title = brand(display)
+    if note:
+        title.append("   ")
+        title.append(note, style=note_style)
+    console.print(card(title, body))
+
+
 # --- splash ----------------------------------------------------------------
 
 _QUICKSTART = [
@@ -136,16 +145,16 @@ def _splash() -> None:
     """Branded banner for the bare command (full help lives behind `-h`)."""
     console.print()
     console.print(
-        f"  [bold cyan]vordr[/][dim]  ·  the warden of your servers[/]"
-        f"   [dim]v{__version__}[/]"
+        f"  [bold {ACCENT}]vordr[/][{MUTED}]  ·  the warden of your servers[/]"
+        f"   [{MUTED}]v{__version__}[/]"
     )
-    console.print("  [dim]gusta-ve · github.com/gusta-ve/vordr · your fleet, one glance[/]")
-    console.print("  [dim]Vörðr · the Norse guardian spirit[/]")
+    console.print(f"  [{MUTED}]gusta-ve · github.com/gusta-ve/vordr · your fleet, one glance[/]")
+    console.print(f"  [{MUTED}]Vörðr · the Norse guardian spirit[/]")
     console.print()
     for cmd, desc in _QUICKSTART:
-        console.print(f"  [cyan]{cmd:<16}[/][dim]{desc}[/]")
+        console.print(f"  [{ACCENT}]{cmd:<16}[/][{MUTED}]{desc}[/]")
     console.print()
-    console.print("  [dim]vordr -h  ·  full help, every command and option[/]")
+    console.print(f"  [{MUTED}]vordr -h  ·  full help, every command and option[/]")
 
 
 # --- commands --------------------------------------------------------------
@@ -154,23 +163,21 @@ def _splash() -> None:
 def hosts() -> None:
     """List the configured hosts (without contacting them)."""
     config = _load_config()
-    table = Table(title="Configured hosts", title_style="bold cyan", expand=False)
-    table.add_column("host", style="bold")
-    table.add_column("ssh", style="cyan")
-    table.add_column("status cmd", style="dim")
-    table.add_column("provider")
-    table.add_column("expires")
+    table = grid("host", "ssh", "status cmd", "provider", "expires")
     for h in config.hosts.values():
         s = h.server
         table.add_row(
-            h.display,
-            h.ssh,
-            h.status_command or "—",
+            Text(h.display, style="bold"),
+            Text(h.ssh, style=ACCENT),
+            Text(h.status_command or "—", style=MUTED),
             s.provider or "—",
             s.expires.isoformat() if s.expires else "—",
         )
-    console.print(table)
-    console.print(f"[dim]source: {config.source or config_path()}[/dim]")
+    console.print()
+    console.print(indent(brand("hosts")))
+    console.print()
+    console.print(indent(table))
+    console.print(indent(meta(f"source: {config.source or config_path()}")))
 
 
 def _is_interactive() -> bool:
@@ -386,35 +393,27 @@ def secret_set(
 @secret_app.command("status")
 def secret_status() -> None:
     """Show which providers have a token configured (without revealing it)."""
-    table = Table(title="API tokens", title_style="bold cyan")
-    table.add_column("provider", style="bold")
-    table.add_column("source")
-    table.add_column("token")
+    table = grid("provider", "source", "token")
     labels = {"env": None, "file": "file"}
     for prov in sorted(secrets.ENV_VARS):
         src = secrets.token_source(prov)
         tok = secrets.get_token(prov)
         source = f"env ({secrets.ENV_VARS[prov]})" if src == "env" else labels.get(src) or "—"
         table.add_row(
-            prov,
+            Text(prov, style="bold"),
             source,
-            secrets.mask(tok) if tok else Text("not set", style="dim"),
+            Text(secrets.mask(tok), style=ACCENT) if tok else Text("not set", style=MUTED),
         )
-    console.print(table)
+    console.print()
+    console.print(indent(brand("api tokens")))
+    console.print()
+    console.print(indent(table))
 
 
 def _build_status_table(
     config: Config, metrics: dict[str, SystemMetrics], today: date
-) -> Table:
-    table = Table(title="Vordr · server status", title_style="bold cyan")
-    table.add_column("host", style="bold")
-    table.add_column("state")
-    table.add_column("uptime")
-    table.add_column("load")
-    table.add_column("ram")
-    table.add_column("disk")
-    table.add_column("docker")
-    table.add_column("expires")
+) -> Group:
+    table = grid("host", "state", "uptime", "load", "ram", "disk", "docker", "expires")
 
     for name, host in config.hosts.items():
         m = metrics[name]
@@ -422,7 +421,7 @@ def _build_status_table(
 
         if not m.reachable:
             table.add_row(
-                host.display,
+                Text(host.display, style="bold"),
                 _state_text(False, m.error),
                 Text(m.error or "unreachable", style="red"),
                 "—", "—", "—", "—",
@@ -449,7 +448,7 @@ def _build_status_table(
             else "—"
         )
         table.add_row(
-            host.display,
+            Text(host.display, style="bold"),
             _state_text(True, None),
             human_uptime(m.uptime_seconds),
             load_txt,
@@ -459,7 +458,7 @@ def _build_status_table(
             Text(days_left_label(days), style=days_left_style(
                 days, warn=config.warn_days, critical=config.critical_days)),
         )
-    return table
+    return Group(Text(), indent(brand("server status")), Text(), indent(table))
 
 
 @app.command()
@@ -518,19 +517,15 @@ def resources(
         raise typer.Exit(0)
     metrics = _probe_all(selected, lambda a: probe_system(a, timeout=timeout))
 
+    console.print()
     for h in selected:
         m: SystemMetrics = metrics[h.name]  # type: ignore[assignment]
         if not m.reachable:
-            console.print(Panel(
-                Text(m.error or "unreachable", style="red"),
-                title=f"[bold]{h.display}[/] [red]offline[/]",
-                border_style="red",
-            ))
+            _print_host_card(h.display, Text(m.error or "unreachable", style="red"),
+                              note="offline", note_style="red")
             continue
 
-        table = Table(show_header=False, box=None, pad_edge=False)
-        table.add_column("k", style="dim")
-        table.add_column("v")
+        table = kv()
         table.add_row("OS", m.os or "—")
         table.add_row("uptime", human_uptime(m.uptime_seconds))
         load_line = (
@@ -561,7 +556,7 @@ def resources(
             table.add_row("docker", f"{m.docker_running} running / {m.docker_total} total")
         table.add_row("sessions", str(m.users) if m.users is not None else "—")
 
-        console.print(Panel(table, title=f"[bold cyan]{h.display}[/]", border_style="cyan"))
+        _print_host_card(h.display, table)
 
 
 @app.command()
@@ -576,19 +571,15 @@ def security(
         raise typer.Exit(0)
     metrics = _probe_all(selected, lambda a: probe_security(a, timeout=timeout))
 
+    console.print()
     for h in selected:
         s: SecurityMetrics = metrics[h.name]  # type: ignore[assignment]
         if not s.reachable:
-            console.print(Panel(
-                Text(s.error or "unreachable", style="red"),
-                title=f"[bold]{h.display}[/] [red]offline[/]",
-                border_style="red",
-            ))
+            _print_host_card(h.display, Text(s.error or "unreachable", style="red"),
+                             note="offline", note_style="red")
             continue
 
-        table = Table(show_header=False, box=None, pad_edge=False)
-        table.add_column("k", style="dim")
-        table.add_column("v")
+        table = kv()
 
         fail_style = "green" if not s.failed_logins else (
             "bold red" if s.failed_logins > 50 else "yellow")
@@ -618,15 +609,12 @@ def security(
             warnings.append("reboot pending")
         if s.updates and s.updates > 0:
             warnings.append(f"{s.updates} updates")
-        verdict = (
-            Text("⚠ attention: " + ", ".join(warnings), style="yellow")
+        verdict, vstyle = (
+            ("⚠ attention: " + ", ".join(warnings), "yellow")
             if warnings
-            else Text("✔ no alerts", style="green")
+            else ("✔ no alerts", "green")
         )
-
-        border = "yellow" if warnings else "green"
-        console.print(Panel(table, title=f"[bold cyan]{h.display}[/]  {verdict}",
-                            border_style=border))
+        _print_host_card(h.display, table, note=verdict, note_style=vstyle)
 
 
 # --- lifecycle: resolve config (manual) > provider API > RDAP -----------------
@@ -852,18 +840,13 @@ def _age_text(lc: _Lifecycle, today: date) -> str:
 def _cost_table(
     rows: list[tuple[Host, _Lifecycle]], config: Config, today: date
 ) -> Table:
-    table = Table(title="Vordr · cost & lifecycle", title_style="bold cyan")
-    table.add_column("host", style="bold")
-    table.add_column("provider")
-    table.add_column("hosting for")
-    table.add_column("server")
-    table.add_column("domain")
-    table.add_column("cost/mo", justify="right")
+    table = grid("host", "provider", "hosting for", "server", "domain", "cost/mo",
+                 right=("cost/mo",))
     for host, lc in rows:
         dom = host.domain
         dom_has = dom is not None and (dom.has_data or bool(dom.name))
         table.add_row(
-            host.display,
+            Text(host.display, style="bold"),
             host.server.provider or "—",
             _age_text(lc, today),
             _renewal_cell(host.server.expires, host.server.has_data, config, today),
@@ -873,44 +856,43 @@ def _cost_table(
     return table
 
 
-def _cost_panel(host: Host, config: Config, today: date, lc: _Lifecycle) -> Panel:
+def _cost_panel(host: Host, config: Config, today: date, lc: _Lifecycle) -> Group:
     srv, dom = host.server, host.domain
-    table = Table(show_header=False, box=None, pad_edge=False)
-    table.add_column("k", style="dim")
-    table.add_column("v")
+    table = kv()
 
     table.add_row("provider", srv.provider or "—")
     age_line = Text(_age_text(lc, today))
     if lc.since:
-        age_line.append(f"  (since {lc.since.isoformat()})", style="dim")
+        age_line.append(f"  (since {lc.since.isoformat()})", style=MUTED)
         if lc.since_auto:
-            age_line.append("  (API)", style="dim italic")
+            age_line.append("  (API)", style=f"italic {MUTED}")
     table.add_row("hosting for", age_line)
 
     table.add_row("server renews", _renewal_cell(srv.expires, srv.has_data, config, today))
     if lc.cost is not None:
-        money = Text(f"{lc.currency} {lc.cost:.2f} / mo", style="dim")
+        money = Text(f"{lc.currency} {lc.cost:.2f} / mo", style=MUTED)
         if lc.cost_auto:
-            money.append("  (API)", style="dim italic")
+            money.append("  (API)", style=f"italic {MUTED}")
         table.add_row("", money)
         if lc.cost_net is not None:
-            table.add_row("", Text(f"net {lc.currency} {lc.cost_net:.2f}", style="dim"))
+            table.add_row("", Text(f"net {lc.currency} {lc.cost_net:.2f}", style=MUTED))
 
     if dom is not None and (lc.domain_expiry is not None or dom.has_data or dom.name):
         cell = _renewal_cell(lc.domain_expiry, dom.has_data or bool(dom.name), config, today)
         if lc.domain_expiry_auto:
-            cell.append("  (RDAP)", style="dim italic")
+            cell.append("  (RDAP)", style=f"italic {MUTED}")
         table.add_row("domain expires", cell)
         detail = " · ".join(p for p in (dom.name, dom.provider) if p)
         if detail:
-            table.add_row("", Text(detail, style="dim"))
+            table.add_row("", Text(detail, style=MUTED))
         if dom.cost is not None:
-            table.add_row("", Text(f"{dom.currency} {dom.cost:.2f} / {dom.cycle}", style="dim"))
+            table.add_row("", Text(f"{dom.currency} {dom.cost:.2f} / {dom.cycle}", style=MUTED))
     else:
-        table.add_row("domain", Text("not set", style="dim"))
+        table.add_row("domain", Text("not set", style=MUTED))
 
-    table.add_row("cost/mo", Text(_money(_monthly_by_currency(host, lc)), style="bold"))
-    return Panel(table, title=f"[bold cyan]{host.display}[/]", border_style="cyan")
+    table.add_row("cost/mo", Text(_money(_monthly_by_currency(host, lc)),
+                                  style=f"bold {ACCENT}"))
+    return card(brand(host.display), table)
 
 
 @app.command()
@@ -962,9 +944,13 @@ def cost(
             known = ", ".join(sorted(h.display for h, _ in rows)) or "(none)"
             err_console.print(f"[bold red]host '{host}' not found.[/] Known: {known}")
             raise typer.Exit(2)
+        console.print()
         console.print(_cost_panel(row[0], config, today, row[1]))
     else:
-        console.print(_cost_table(rows, config, today))
+        console.print()
+        console.print(indent(brand("cost & lifecycle")))
+        console.print()
+        console.print(indent(_cost_table(rows, config, today)))
 
         totals: dict[str, float] = {}
         missing: list[str] = []
@@ -980,20 +966,21 @@ def cost(
             if not has_any:
                 missing.append(h.display)
 
+        console.print()
         if totals:
-            console.print(f"[bold]estimated monthly total:[/] {_money(totals)}")
+            console.print(indent(meta(f"total  {_money(totals)}")))
         if missing:
-            console.print(
-                f"[dim]no billing data: {', '.join(missing)} — "
-                f"edit {config.source or config_path()} (or run `vordr init`).[/dim]"
-            )
+            console.print(indent(meta(
+                f"no billing data: {', '.join(missing)} — "
+                f"edit {config.source or config_path()}"
+            )))
 
     for prov in sorted(accounts):
         burn, _cur = _provider_monthly_burn(rows, prov)
-        console.print(_billing_summary_line(prov, accounts[prov], burn, today))
+        console.print(indent(_billing_summary_line(prov, accounts[prov], burn, today)))
 
     for note in notes:
-        console.print(f"[dim yellow]{note}[/]")
+        console.print(indent(meta(note)))
 
 
 # --- balance & billing per provider ------------------------------------------
@@ -1057,9 +1044,9 @@ def _runway(
 
 def _billing_summary_line(
     prov: str, acct: providers.AccountBilling, burn: float | None, today: date
-) -> str:
+) -> Text:
     """Short line for the `cost` footer (credit + runway)."""
-    parts = [f"[bold]{prov.capitalize()}[/]"]
+    parts = [prov.capitalize()]
     cr = acct.credit
     if cr is not None:
         parts.append(f"credit {acct.currency} {cr:.2f}")
@@ -1071,7 +1058,7 @@ def _billing_summary_line(
     days, runout = _runway(net, burn, today)
     if days is not None and runout is not None:
         parts.append(f"runway ~{days}d → {runout.isoformat()}")
-    return "[dim]" + "  ·  ".join(parts) + "[/]"
+    return meta(*parts)
 
 
 def _billing_panel(
@@ -1082,21 +1069,18 @@ def _billing_panel(
     config: Config,
     today: date,
     offline: bool,
-) -> Panel:
-    table = Table(show_header=False, box=None, pad_edge=False)
-    table.add_column("k", style="dim")
-    table.add_column("v")
-    table.add_row("provider", prov.capitalize())
+) -> Group:
+    table = kv()
 
     if _billing_model(prov) == "prepaid":
         table.add_row("model", "prepaid (credit/balance)")
         if acct is None:
             if offline:
-                detail = Text("— (offline)", style="dim")
+                detail = Text("— (offline)", style=MUTED)
             elif not secrets.get_token(prov):
                 detail = Text(f"no token — run `vordr secret set {prov}`", style="yellow")
             else:
-                detail = Text("unavailable", style="dim")
+                detail = Text("unavailable", style=MUTED)
             table.add_row("balance", detail)
         else:
             cr = acct.credit
@@ -1106,7 +1090,7 @@ def _billing_panel(
                 table.add_row("pending", f"{acct.currency} {acct.pending_charges:.2f}")
             net = acct.net_remaining
             if net is not None:
-                table.add_row("net", Text(f"{acct.currency} {net:.2f}", style="bold"))
+                table.add_row("net", Text(f"{acct.currency} {net:.2f}", style=f"bold {ACCENT}"))
             days, runout = _runway(net, burn, today)
             if days is not None and runout is not None:
                 style = days_left_style(days, warn=config.warn_days, critical=config.critical_days)
@@ -1115,10 +1099,10 @@ def _billing_panel(
                     Text(f"~{days} days  (runs out {runout.isoformat()})", style=style),
                 )
                 table.add_row(
-                    "billing", Text("on credit — no card until the balance runs out", style="dim")
+                    "billing", Text("on credit — no card until the balance runs out", style=MUTED)
                 )
             else:
-                table.add_row("billing", Text("on credit", style="dim"))
+                table.add_row("billing", Text("on credit", style=MUTED))
     else:  # postpaid — charged to the card, fixed calendar
         table.add_row("model", "postpaid (card)")
         nxt = _first_of_next_month(today)
@@ -1132,10 +1116,10 @@ def _billing_panel(
             ),
         )
         table.add_row(
-            "balance", Text(f"— (not exposed by the {prov.capitalize()} API)", style="dim")
+            "balance", Text(f"— (not exposed by the {prov.capitalize()} API)", style=MUTED)
         )
 
-    return Panel(table, title=f"[bold cyan]{prov.capitalize()}[/]", border_style="cyan")
+    return card(brand(prov.capitalize()), table)
 
 
 @app.command()
@@ -1179,6 +1163,7 @@ def billing(
             console.print(f"[dim yellow]{note}[/]")
         raise typer.Exit(0)
 
+    console.print()
     for prov in providers_seen:
         burn, currency = _provider_monthly_burn(rows, prov)
         console.print(
@@ -1186,7 +1171,7 @@ def billing(
         )
 
     for note in notes:
-        console.print(f"[dim yellow]{note}[/]")
+        console.print(indent(meta(note)))
 
 
 def _version_callback(value: bool) -> None:
