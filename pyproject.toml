@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vordr"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Guardião dos servidores — monitoramento de status, recursos, custo/expiração e segurança de hosts Linux via SSH."
 readme = "README.md"
 license = { text = "MIT" }
@@ -36,6 +36,9 @@ Issues = "https://github.com/gusta-ve/vordr/issues"
 
 [project.scripts]
 vordr = "vordr.cli:app"
+
+[tool.hatch.version]
+path = "vordr/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["vordr"]
