@@ -1,12 +1,12 @@
-"""Cliente mínimo da API Vultr v2 — somente leitura.
+"""Minimal Vultr v2 API client — read-only.
 
-Puxa a data de criação de cada instância (``date_created`` → ``since``) e o custo
-mensal do plano. Como na Hetzner, o preço é o **de lista do plano** (a Vultr não
-expõe o valor exato por instância, incluindo sobretaxas de região como São Paulo);
-por isso o valor manual no config sempre vence.
+Pulls each instance's creation date (``date_created`` → ``since``) and the plan's
+monthly cost. As with Hetzner, the price is the **plan list price** (Vultr doesn't
+expose the exact per-instance value, including region surcharges such as São Paulo);
+that's why the manual value in config always wins.
 
-Atenção: o token da Vultr é *full-access* (não há opção read-only) e a API usa uma
-allowlist de IP — adicione seu IP em Account → API.
+Note: the Vultr token is *full-access* (there's no read-only option) and the API uses
+an IP allowlist — add your IP under Account → API.
 """
 
 from __future__ import annotations
@@ -22,12 +22,12 @@ PLANS_URL = "https://api.vultr.com/v2/plans?per_page=500"
 ACCOUNT_URL = "https://api.vultr.com/v2/account"
 DEFAULT_TIMEOUT = 15
 
-# A Vultr é pré-paga: o uso é debitado de um saldo/crédito (ex.: bônus de cadastro).
+# Vultr is prepaid: usage is drawn from a balance/credit (e.g. a signup bonus).
 BILLING_MODEL = "prepaid"
 
 
 class VultrError(ProviderError):
-    """Falha ao falar com a API da Vultr (token inválido, IP não autorizado, etc.)."""
+    """Failure talking to the Vultr API (invalid token, IP not allowed, etc.)."""
 
 
 def _get(url: str, token: str, timeout: int) -> dict:
@@ -36,17 +36,17 @@ def _get(url: str, token: str, timeout: int) -> dict:
         headers={"Authorization": f"Bearer {token}", "User-Agent": "vordr"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (https fixo)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (fixed https)
             return json.load(resp)
     except urllib.error.HTTPError as exc:
         if exc.code in (401, 403):
             raise VultrError(
-                f"token inválido ou IP não autorizado (HTTP {exc.code}) — "
-                "confira a allowlist em Account → API"
+                f"invalid token or IP not allowed (HTTP {exc.code}) — "
+                "check the allowlist under Account → API"
             ) from exc
-        raise VultrError(f"HTTP {exc.code} da API da Vultr") from exc
+        raise VultrError(f"HTTP {exc.code} from the Vultr API") from exc
     except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError) as exc:
-        raise VultrError(f"falha ao contatar a API da Vultr: {exc}") from exc
+        raise VultrError(f"failed to contact the Vultr API: {exc}") from exc
 
 
 def _plan_costs(token: str, timeout: int) -> dict[str, float]:
@@ -69,14 +69,14 @@ def parse_instances(payload: dict, plan_costs: dict[str, float]) -> dict[str, Se
             name=name,
             created=parse_api_date(inst.get("date_created")),
             cost_net=cost,
-            cost_gross=cost,  # Vultr não distingue net/gross
+            cost_gross=cost,  # Vultr doesn't distinguish net/gross
             currency="USD",
         )
     return result
 
 
 def fetch_servers(token: str, *, timeout: int = DEFAULT_TIMEOUT) -> dict[str, ServerBilling]:
-    """Lista as instâncias da conta. Levanta :class:`VultrError` em falha."""
+    """List the account's instances. Raises :class:`VultrError` on failure."""
     plan_costs = _plan_costs(token, timeout)
     instances = _get(INSTANCES_URL, token, timeout)
     return parse_instances(instances, plan_costs)
@@ -92,5 +92,5 @@ def parse_account(payload: dict) -> AccountBilling:
 
 
 def fetch_account(token: str, *, timeout: int = DEFAULT_TIMEOUT) -> AccountBilling:
-    """Saldo e cobranças pendentes da conta. Levanta :class:`VultrError` em falha."""
+    """Account balance and pending charges. Raises :class:`VultrError` on failure."""
     return parse_account(_get(ACCOUNT_URL, token, timeout))

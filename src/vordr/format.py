@@ -1,13 +1,13 @@
-"""Funções puras de formatação e classificação por limiar.
+"""Pure formatting and threshold-classification helpers.
 
-Mantidas separadas da UI para serem trivialmente testáveis (sem rich, sem SSH).
+Kept separate from the UI so they're trivially testable (no rich, no SSH).
 """
 
 from __future__ import annotations
 
 
 def human_uptime(seconds: int | None) -> str:
-    """Formata segundos de uptime como ``2sem 5d 3h``."""
+    """Format uptime seconds as ``2w 5d 3h``."""
     if seconds is None or seconds < 0:
         return "—"
     weeks, rem = divmod(seconds, 604800)
@@ -16,34 +16,34 @@ def human_uptime(seconds: int | None) -> str:
     minutes = rem // 60
     parts = []
     if weeks:
-        parts.append(f"{weeks}sem")
+        parts.append(f"{weeks}w")
     if days:
         parts.append(f"{days}d")
     if hours:
         parts.append(f"{hours}h")
-    if not parts:  # uptime curto: mostra minutos
-        parts.append(f"{minutes}min")
+    if not parts:  # short uptime: show minutes
+        parts.append(f"{minutes}m")
     return " ".join(parts[:3])
 
 
 def human_age(days: int | None) -> str:
-    """Formata uma duração em dias como ``1a 3m`` (tempo de hospedagem/domínio)."""
+    """Format a span in days as ``1y 3mo`` (hosting/domain age)."""
     if days is None or days < 0:
         return "—"
     years, rem = divmod(days, 365)
     months = rem // 30
     parts = []
     if years:
-        parts.append(f"{years}a")
+        parts.append(f"{years}y")
     if months:
-        parts.append(f"{months}m")
-    if not parts:  # menos de um mês: mostra os dias
+        parts.append(f"{months}mo")
+    if not parts:  # less than a month: show days
         parts.append(f"{days}d")
     return " ".join(parts)
 
 
 def human_kb(kilobytes: int | None) -> str:
-    """Formata KiB como string legível (MiB/GiB/TiB)."""
+    """Format KiB as a readable string (MiB/GiB/TiB)."""
     if kilobytes is None:
         return "—"
     value = float(kilobytes)
@@ -55,7 +55,7 @@ def human_kb(kilobytes: int | None) -> str:
 
 
 def pct_style(pct: int | None, *, warn: int = 75, crit: int = 90) -> str:
-    """Cor rich para um percentual de uso (verde/amarelo/vermelho)."""
+    """Rich color for a usage percentage (green/yellow/red)."""
     if pct is None:
         return "dim"
     if pct >= crit:
@@ -66,7 +66,7 @@ def pct_style(pct: int | None, *, warn: int = 75, crit: int = 90) -> str:
 
 
 def load_style(load_per_cpu: float | None) -> str:
-    """Cor rich para a carga normalizada por CPU."""
+    """Rich color for the per-CPU normalized load."""
     if load_per_cpu is None:
         return "dim"
     if load_per_cpu >= 1.0:
@@ -77,7 +77,7 @@ def load_style(load_per_cpu: float | None) -> str:
 
 
 def days_left_style(days: int | None, *, warn: int, critical: int) -> str:
-    """Cor rich para dias restantes até expiração/cobrança."""
+    """Rich color for days left until expiry/charge."""
     if days is None:
         return "dim"
     if days < 0:
@@ -93,7 +93,7 @@ def days_left_label(days: int | None) -> str:
     if days is None:
         return "—"
     if days < 0:
-        return f"vencido há {abs(days)}d"
+        return f"{abs(days)}d overdue"
     if days == 0:
-        return "vence hoje"
+        return "due today"
     return f"{days}d"

@@ -21,9 +21,9 @@ def test_list_aliases_reads_hosts(tmp_path):
     cfg = tmp_path / "config"
     cfg.write_text(SSH_CONFIG, encoding="utf-8")
     aliases = ssh.list_aliases(cfg)
-    # ignora padrões com curinga (*.internal, *) e mantém a ordem
+    # skip wildcard patterns (*.internal, *) and keep the order
     assert aliases == ["nexus", "db", "prod-db"]
 
 
 def test_list_aliases_missing_file(tmp_path):
-    assert ssh.list_aliases(tmp_path / "ausente") == []
+    assert ssh.list_aliases(tmp_path / "missing") == []

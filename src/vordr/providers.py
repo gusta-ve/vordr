@@ -1,9 +1,9 @@
-"""Tipos compartilhados pelos clientes de API de provedores de nuvem.
+"""Shared types for the cloud provider API clients.
 
-Cada provedor (``hetzner``, ``vultr``, …) tem seu módulo com uma função
-``fetch_servers(token, *, timeout)`` que devolve ``{nome: ServerBilling}``. O valor
-**manual** no config sempre vence o que vem daqui — preços de lista podem diferir do
-que a sua conta realmente paga.
+Each provider (``hetzner``, ``vultr``, …) has its own module with a
+``fetch_servers(token, *, timeout)`` function returning ``{name: ServerBilling}``. The
+**manual** value in config always wins over what comes from here — list prices may
+differ from what your account actually pays.
 """
 
 from __future__ import annotations
@@ -13,12 +13,12 @@ from datetime import date, datetime
 
 
 class ProviderError(RuntimeError):
-    """Falha ao falar com a API de um provedor (token inválido, rede, etc.)."""
+    """Failure talking to a provider's API (invalid token, network, etc.)."""
 
 
 @dataclass
 class ServerBilling:
-    """Dados de cobrança de um servidor, vindos da API do provedor."""
+    """A server's billing data, from the provider's API."""
 
     name: str
     created: date | None = None
@@ -29,11 +29,11 @@ class ServerBilling:
 
 @dataclass
 class AccountBilling:
-    """Saldo/cobrança da **conta** de um provedor (não de um servidor específico).
+    """The **account** balance/billing of a provider (not a specific server).
 
-    ``balance`` segue a convenção da Vultr: **negativo = crédito a seu favor**
-    (ex.: bônus de cadastro). ``pending_charges`` é o uso já acumulado no ciclo
-    atual, ainda não deduzido. Provedores postpagos (cartão) podem não expor saldo.
+    ``balance`` follows Vultr's convention: **negative = credit in your favor**
+    (e.g. a signup bonus). ``pending_charges`` is the usage already accrued this
+    cycle, not yet deducted. Postpaid (card) providers may not expose a balance.
     """
 
     balance: float | None = None
@@ -42,14 +42,14 @@ class AccountBilling:
 
     @property
     def credit(self) -> float | None:
-        """Crédito disponível (saldo negativo vira positivo). ``None`` se desconhecido."""
+        """Available credit (negative balance becomes positive). ``None`` if unknown."""
         if self.balance is None:
             return None
         return round(-self.balance, 2) if self.balance < 0 else 0.0
 
     @property
     def net_remaining(self) -> float | None:
-        """Crédito após descontar o uso pendente do ciclo."""
+        """Credit after subtracting this cycle's pending usage."""
         cr = self.credit
         if cr is None:
             return None
@@ -57,7 +57,7 @@ class AccountBilling:
 
 
 def parse_api_date(raw: object) -> date | None:
-    """Converte um timestamp ISO-8601 (com ``Z``) em :class:`date`."""
+    """Convert an ISO-8601 timestamp (with ``Z``) into a :class:`date`."""
     if not isinstance(raw, str):
         return None
     try:

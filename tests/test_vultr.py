@@ -11,7 +11,7 @@ INSTANCES = {
             "plan": "vc2-2c-8gb",
             "region": "sao",
         },
-        {  # instância sem label cai no id
+        {  # instance with no label falls back to the id
             "id": "no-label-9",
             "date_created": "2026-01-01T00:00:00Z",
             "plan": "vc2-1c-1gb",
@@ -62,8 +62,8 @@ def test_parse_account_credit_and_pending():
     acct = vultr.parse_account(ACCOUNT)
     assert acct.balance == -193.88
     assert acct.pending_charges == 79.02
-    assert acct.credit == 193.88           # saldo negativo vira crédito
-    assert acct.net_remaining == 114.86    # crédito - pendente
+    assert acct.credit == 193.88           # negative balance becomes credit
+    assert acct.net_remaining == 114.86    # credit - pending
 
 
 def test_fetch_account_hits_account_endpoint(monkeypatch):

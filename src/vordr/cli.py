@@ -1,4 +1,4 @@
-"""Interface de linha de comando do Vordr."""
+"""Vordr command-line interface."""
 
 from __future__ import annotations
 
@@ -30,36 +30,36 @@ from .probe import SecurityMetrics, SystemMetrics, probe_security, probe_system
 
 app = typer.Typer(
     name="vordr",
-    help="Vordr — guardião dos servidores. Monitora status, recursos, "
-    "custo/expiração e segurança dos seus hosts via SSH.",
+    help="Vordr — the warden of your servers. Watches status, resources, "
+    "cost/expiry and security of your hosts over SSH.",
     add_completion=False,
-    no_args_is_help=True,
+    context_settings={"help_option_names": ["-h", "--help"]},
 )
 console = Console()
 err_console = Console(stderr=True)
 
 CONFIG_TEMPLATE = """\
-# Configuração do Vordr — ~/.config/vordr/config.toml
+# Vordr configuration — ~/.config/vordr/config.toml
 #
-# Este arquivo é OPCIONAL: com um token (`vordr secret set hetzner|vultr`) o Vordr
-# descobre seus servidores sozinho. Use-o só para o que a API não sabe — um apelido,
-# o alias SSH (necessário para `status`) ou um preço travado (promoção/legado).
+# This file is OPTIONAL: with a token (`vordr secret set hetzner|vultr`) Vordr
+# discovers your servers on its own. Use it only for what the API can't know — a
+# label, the SSH alias (needed for `status`) or a pinned price (promo/legacy).
 
 [hosts.web]
-ssh = "web"                 # alias do ~/.ssh/config (use "" se o host não tiver SSH)
+ssh = "web"                 # alias from ~/.ssh/config (use "" if the host has no SSH)
 
   [hosts.web.server]
-  provider = "Hetzner"      # Hetzner | Vultr — habilita custo e since automáticos
-  # cost = 4.99             # opcional: trava um preço (vence o da API)
+  provider = "Hetzner"      # Hetzner | Vultr — enables automatic cost and since
+  # cost = 4.99             # optional: pins a price (wins over the API)
   # currency = "EUR"
 
   [hosts.web.domain]
-  name = "web.exemplo.com"  # a expiração vem do RDAP automaticamente
+  name = "web.example.com"  # expiry comes from RDAP automatically
 
-# Opcionais por host:  label, status_command
+# Optional per host:  label, status_command
 #   [server]: provider_server, since, expires, cost, currency, cycle (monthly|yearly)
 #   [domain]: registrar, expires, cost, currency, cycle
-# Limiares de alerta (padrão 14/7 dias):
+# Alert thresholds (default 14/7 days):
 # [thresholds]
 # warn_days = 14
 # critical_days = 7
@@ -72,11 +72,11 @@ def _load_config(*, require_hosts: bool = True) -> Config:
     try:
         config = load()
     except ConfigError as exc:
-        err_console.print(f"[bold red]erro de configuração:[/] {exc}")
+        err_console.print(f"[bold red]config error:[/] {exc}")
         raise typer.Exit(2) from exc
     if require_hosts and not config.hosts:
         console.print(
-            "[yellow]Nenhum host configurado.[/] Rode [bold]vordr init[/] e edite "
+            "[yellow]No hosts configured.[/] Run [bold]vordr init[/] and edit "
             f"{config.source or config_path()}."
         )
         raise typer.Exit(0)
@@ -94,18 +94,18 @@ def _select_hosts(config: Config, host: str | None) -> list[Host]:
 
 
 def _require_ssh(selected: list[Host]) -> list[Host]:
-    """Mantém só hosts com alias SSH; avisa sobre os 'billing-only' (sem SSH)."""
+    """Keep only hosts with an SSH alias; warn about the 'billing-only' ones."""
     usable = [h for h in selected if h.ssh.strip()]
     skipped = [h.display for h in selected if not h.ssh.strip()]
     if skipped:
         console.print(
-            f"[dim]sem alias SSH (use `vordr cost`/`billing`): {', '.join(skipped)}[/]"
+            f"[dim]no SSH alias (use `vordr cost`/`billing`): {', '.join(skipped)}[/]"
         )
     return usable
 
 
 def _probe_all(hosts: list[Host], fn) -> dict[str, object]:
-    """Executa ``fn(host)`` em paralelo (I/O de SSH é o gargalo)."""
+    """Run ``fn(host)`` in parallel (SSH I/O is the bottleneck)."""
     results: dict[str, object] = {}
     if not hosts:
         return results
@@ -123,18 +123,43 @@ def _state_text(reachable: bool, error: str | None) -> Text:
     return Text("● offline", style="bold red")
 
 
+# --- splash ----------------------------------------------------------------
+
+_QUICKSTART = [
+    ("vordr cost", "servers, cost & balance at a glance"),
+    ("vordr billing", "credit, runway & next charge"),
+    ("vordr status", "are they up? load, ram, disk, docker"),
+]
+
+
+def _splash() -> None:
+    """Branded banner for the bare command (full help lives behind `-h`)."""
+    console.print()
+    console.print(
+        f"  [bold cyan]vordr[/][dim]  ·  the warden of your servers[/]"
+        f"   [dim]v{__version__}[/]"
+    )
+    console.print("  [dim]gusta-ve · github.com/gusta-ve/vordr · your fleet, one glance[/]")
+    console.print("  [dim]Vörðr · the Norse guardian spirit[/]")
+    console.print()
+    for cmd, desc in _QUICKSTART:
+        console.print(f"  [cyan]{cmd:<16}[/][dim]{desc}[/]")
+    console.print()
+    console.print("  [dim]vordr -h  ·  full help, every command and option[/]")
+
+
 # --- commands --------------------------------------------------------------
 
 @app.command()
 def hosts() -> None:
-    """Lista os hosts configurados (sem contatá-los)."""
+    """List the configured hosts (without contacting them)."""
     config = _load_config()
-    table = Table(title="Hosts configurados", title_style="bold cyan", expand=False)
+    table = Table(title="Configured hosts", title_style="bold cyan", expand=False)
     table.add_column("host", style="bold")
     table.add_column("ssh", style="cyan")
     table.add_column("status cmd", style="dim")
-    table.add_column("provedor")
-    table.add_column("expira")
+    table.add_column("provider")
+    table.add_column("expires")
     for h in config.hosts.values():
         s = h.server
         table.add_row(
@@ -145,31 +170,33 @@ def hosts() -> None:
             s.expires.isoformat() if s.expires else "—",
         )
     console.print(table)
-    console.print(f"[dim]fonte: {config.source or config_path()}[/dim]")
+    console.print(f"[dim]source: {config.source or config_path()}[/dim]")
 
 
 def _is_interactive() -> bool:
-    """Há um terminal de verdade para fazer perguntas? (falso em pipes/testes)."""
+    """Is there a real terminal to ask questions? (false in pipes/tests)."""
     return sys.stdin.isatty()
 
 
 @app.command()
 def init(
-    force: bool = typer.Option(False, "--force", "-f", help="Sobrescreve config existente."),
+    force: bool = typer.Option(False, "--force", "-f", help="Overwrite an existing config."),
 ) -> None:
-    """Cria o config. Num terminal, vira um assistente que importa seus servidores.
+    """Create the config. In a terminal, becomes a wizard that imports your servers.
 
-    Com um token salvo, o ``init`` lista os servidores da conta e monta o config para
-    você — sem escrever TOML na mão. Sem terminal (pipe/CI) ou sem token, escreve um
-    modelo comentado.
+    With a saved token, ``init`` lists the account's servers and builds the config for
+    you — no hand-written TOML. Without a terminal (pipe/CI) or without a token, it
+    writes a commented template.
     """
     path = config_path()
     interactive = _is_interactive()
     if path.exists() and not force:
-        overwrite = interactive and typer.confirm(f"{path} já existe. Sobrescrever?", default=False)
+        overwrite = interactive and typer.confirm(
+            f"{path} already exists. Overwrite?", default=False
+        )
         if not overwrite:
             err_console.print(
-                f"[yellow]já existe:[/] {path}\nUse [bold]--force[/] para sobrescrever."
+                f"[yellow]already exists:[/] {path}\nUse [bold]--force[/] to overwrite."
             )
             raise typer.Exit(1)
 
@@ -177,20 +204,20 @@ def init(
     content = _render_config(blocks) if blocks else CONFIG_TEMPLATE
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
-    console.print(f"[green]✔[/] configuração criada em [bold]{path}[/]")
+    console.print(f"[green]✔[/] config created at [bold]{path}[/]")
     if blocks:
         console.print(
-            f"[dim]{len(blocks)} host(s) importado(s). Rode `vordr cost` ou `vordr status`.[/dim]"
+            f"[dim]{len(blocks)} host(s) imported. Run `vordr cost` or `vordr status`.[/dim]"
         )
     else:
         console.print(
-            "[dim]edite os hosts (ou rode `vordr secret set` e `vordr init` de novo "
-            "para importar da API) e use `vordr cost`.[/dim]"
+            "[dim]edit the hosts (or run `vordr secret set` and `vordr init` again "
+            "to import from the API) and use `vordr cost`.[/dim]"
         )
 
 
 def _suggest_alias(name: str, aliases: list[str]) -> str | None:
-    """Casa o nome do servidor com um alias SSH (igualdade ou substring)."""
+    """Match a server name to an SSH alias (equality or substring)."""
     low = name.lower()
     for alias in aliases:
         al = alias.lower()
@@ -200,7 +227,7 @@ def _suggest_alias(name: str, aliases: list[str]) -> str | None:
 
 
 def _toml_key(value: str, used: set[str]) -> str:
-    """Chave de tabela TOML segura e única (A-Za-z0-9_-)."""
+    """A safe, unique TOML table key (A-Za-z0-9_-)."""
     base = "".join(c if (c.isalnum() or c in "_-") else "-" for c in value).strip("-") or "host"
     key, n = base, 2
     while key in used:
@@ -213,7 +240,7 @@ def _render_host_block(key: str, alias: str, provider: str, sb, cost: float | No
     if alias:
         ssh_line = f'ssh = "{alias}"'
     else:
-        ssh_line = 'ssh = ""   # sem alias SSH: entra em cost/billing, não em status'
+        ssh_line = 'ssh = ""   # no SSH alias: shows in cost/billing, not status'
     lines = [
         f"[hosts.{key}]",
         ssh_line,
@@ -225,16 +252,16 @@ def _render_host_block(key: str, alias: str, provider: str, sb, cost: float | No
     if cost is not None:
         lines.append(f"  cost = {cost}")
         lines.append(f'  currency = "{sb.currency}"')
-        lines.append("  # preço fixo (vence a API). Apague para voltar ao valor da API.")
+        lines.append("  # pinned price (wins over the API). Delete to use the API value.")
     else:
-        lines.append("  # custo e since vêm da API automaticamente (preço de lista).")
+        lines.append("  # cost and since come from the API automatically (list price).")
     return "\n".join(lines)
 
 
 def _render_config(blocks: list[str]) -> str:
     header = (
-        "# Configuração do Vordr — gerada por `vordr init`.\n"
-        "# Campos em branco são preenchidos pela API/RDAP; o que você escrever vence.\n\n"
+        "# Vordr configuration — generated by `vordr init`.\n"
+        "# Blank fields are filled from the API/RDAP; what you write wins.\n\n"
         "[thresholds]\n"
         "warn_days = 14\n"
         "critical_days = 7\n\n"
@@ -243,12 +270,12 @@ def _render_config(blocks: list[str]) -> str:
 
 
 def _wizard_import() -> list[str]:
-    """Assistente interativo: descobre servidores pela API e monta blocos de config."""
+    """Interactive wizard: discover servers via the API and build config blocks."""
     tokened = [p for p in _PROVIDER_CLIENTS if secrets.get_token(p)]
     if not tokened:
-        console.print("[dim]Nenhum token de provedor salvo.[/]")
+        console.print("[dim]No provider token saved.[/]")
         choice = typer.prompt(
-            f"Configurar um agora? Provedor ({'/'.join(secrets.ENV_VARS)}) ou enter p/ pular",
+            f"Set one now? Provider ({'/'.join(secrets.ENV_VARS)}) or enter to skip",
             default="",
             show_default=False,
         ).strip().lower()
@@ -268,35 +295,35 @@ def _wizard_import() -> list[str]:
 
     total = sum(len(c) for c in discovered.values())
     if not total:
-        console.print("[yellow]Nenhum servidor encontrado nas contas.[/]")
+        console.print("[yellow]No servers found in the accounts.[/]")
         return []
-    console.print(f"[cyan]{total} servidor(es) encontrado(s).[/] Mapeie cada um:")
+    console.print(f"[cyan]{total} server(s) found.[/] Map each one:")
 
     aliases = ssh.list_aliases()
     blocks: list[str] = []
     used: set[str] = set()
     for prov in sorted(discovered):
         for name, sb in sorted(discovered[prov].items()):
-            if not typer.confirm(f"  importar '{name}' ({prov.capitalize()})?", default=True):
+            if not typer.confirm(f"  import '{name}' ({prov.capitalize()})?", default=True):
                 continue
             suggestion = _suggest_alias(name, aliases)
             if suggestion:
                 alias = typer.prompt(
-                    "    alias SSH (p/ status/resources)", default=suggestion
+                    "    SSH alias (for status/resources)", default=suggestion
                 ).strip()
             else:
                 alias = typer.prompt(
-                    "    alias SSH (enter se não houver — entra só em cost/billing)",
+                    "    SSH alias (enter if none — cost/billing only)",
                     default="",
                     show_default=False,
                 ).strip()
             api_hint = (
                 f"{sb.currency} {sb.cost_gross:.2f}"
                 if sb.cost_gross is not None
-                else "desconhecido"
+                else "unknown"
             )
             cost_in = typer.prompt(
-                f"    preço/mês fixo? (enter = usar a API: {api_hint})",
+                f"    fixed price/mo? (enter = use the API: {api_hint})",
                 default="",
                 show_default=False,
             ).strip()
@@ -305,65 +332,65 @@ def _wizard_import() -> list[str]:
                 try:
                     cost = round(float(cost_in.replace(",", ".")), 2)
                 except ValueError:
-                    console.print("[yellow]    valor inválido — usando o da API.[/]")
+                    console.print("[yellow]    invalid value — using the API's.[/]")
             key = _toml_key(alias or name, used)
             blocks.append(_render_host_block(key, alias, prov.capitalize(), sb, cost))
     return blocks
 
 
 secret_app = typer.Typer(
-    help="Gerencia tokens de API de provedores — guardados fora do repositório.",
+    help="Manage provider API tokens — stored outside the repository.",
     no_args_is_help=True,
 )
 app.add_typer(secret_app, name="secret")
 
 
 def _store_token_flow(provider: str) -> bool:
-    """Pede, valida (com uma leitura na API) e grava o token. True se gravou."""
-    token = typer.prompt(f"Token da API ({provider})", hide_input=True).strip()
+    """Prompt, validate (one API read) and store the token. True if stored."""
+    token = typer.prompt(f"API token ({provider})", hide_input=True).strip()
     if not token:
-        err_console.print("[red]token vazio.[/]")
+        err_console.print("[red]empty token.[/]")
         return False
     client = _PROVIDER_CLIENTS.get(provider)
-    if client is not None:  # valida com uma leitura antes de gravar
+    if client is not None:  # validate with a read before storing
         try:
             client.fetch_servers(token, timeout=15)
         except providers.ProviderError as exc:
-            err_console.print(f"[red]token rejeitado:[/] {exc}")
+            err_console.print(f"[red]token rejected:[/] {exc}")
             return False
     path = secrets.set_token(provider, token)
-    console.print(f"[green]✔[/] token de [bold]{provider}[/] salvo em [bold]{path}[/] (chmod 600)")
+    console.print(f"[green]✔[/] [bold]{provider}[/] token saved to [bold]{path}[/] (chmod 600)")
     return True
 
 
 @secret_app.command("set")
 def secret_set(
-    provider: str = typer.Argument(..., help=f"Um de: {', '.join(secrets.ENV_VARS)}."),
+    provider: str = typer.Argument(..., help=f"One of: {', '.join(secrets.ENV_VARS)}."),
 ) -> None:
-    """Salva (e valida) o token de API de um provedor em ~/.config/vordr/secrets.toml."""
+    """Save (and validate) a provider's API token in ~/.config/vordr/secrets.toml."""
     provider = provider.lower()
     if provider not in secrets.ENV_VARS:
         err_console.print(
-            f"[red]provedor desconhecido:[/] {provider} "
-            f"(conhecidos: {', '.join(secrets.ENV_VARS)})"
+            f"[red]unknown provider:[/] {provider} "
+            f"(known: {', '.join(secrets.ENV_VARS)})"
         )
         raise typer.Exit(2)
     if not _store_token_flow(provider):
         raise typer.Exit(1)
     console.print(
-        f"[dim]a variável de ambiente {secrets.ENV_VARS[provider]} tem prioridade "
-        f"sobre o arquivo, se definida.[/dim]"
+        f"[dim]the {secrets.ENV_VARS[provider]} environment variable takes precedence "
+        f"over the file, if set.[/dim]"
     )
 
 
 @secret_app.command("status")
 def secret_status() -> None:
-    """Mostra quais provedores têm token configurado (sem revelá-lo)."""
-    table = Table(title="Tokens de API", title_style="bold cyan")
-    table.add_column("provedor", style="bold")
-    table.add_column("fonte")
+    """Show which providers have a token configured (without revealing it)."""
+    table = Table(title="API tokens", title_style="bold cyan")
+    table.add_column("provider", style="bold")
+    table.add_column("source")
     table.add_column("token")
-    labels = {"env": None, "file": "arquivo"}
+    labels = {"env": None, "file": "file"}
     for prov in sorted(secrets.ENV_VARS):
         src = secrets.token_source(prov)
         tok = secrets.get_token(prov)
@@ -371,7 +398,7 @@ def secret_status() -> None:
         table.add_row(
             prov,
             source,
-            secrets.mask(tok) if tok else Text("não configurado", style="dim"),
+            secrets.mask(tok) if tok else Text("not set", style="dim"),
         )
     console.print(table)
 
@@ -379,15 +406,15 @@ def secret_status() -> None:
 def _build_status_table(
     config: Config, metrics: dict[str, SystemMetrics], today: date
 ) -> Table:
-    table = Table(title="Vordr · status dos servidores", title_style="bold cyan")
+    table = Table(title="Vordr · server status", title_style="bold cyan")
     table.add_column("host", style="bold")
-    table.add_column("estado")
+    table.add_column("state")
     table.add_column("uptime")
     table.add_column("load")
     table.add_column("ram")
-    table.add_column("disco")
+    table.add_column("disk")
     table.add_column("docker")
-    table.add_column("expira")
+    table.add_column("expires")
 
     for name, host in config.hosts.items():
         m = metrics[name]
@@ -397,7 +424,7 @@ def _build_status_table(
             table.add_row(
                 host.display,
                 _state_text(False, m.error),
-                Text(m.error or "inacessível", style="red"),
+                Text(m.error or "unreachable", style="red"),
                 "—", "—", "—", "—",
                 Text(days_left_label(days), style=days_left_style(
                     days, warn=config.warn_days, critical=config.critical_days)),
@@ -437,16 +464,16 @@ def _build_status_table(
 
 @app.command()
 def status(
-    host: str = typer.Argument(None, help="Host específico (padrão: todos)."),
+    host: str = typer.Argument(None, help="Specific host (default: all)."),
     raw: bool = typer.Option(
-        False, "--raw", help="Mostra a saída nativa do status_command do host."
+        False, "--raw", help="Show the host's native status_command output."
     ),
     watch: float = typer.Option(
-        0, "--watch", "-w", help="Atualiza a cada N segundos (0 = uma vez)."
+        0, "--watch", "-w", help="Refresh every N seconds (0 = once)."
     ),
-    timeout: int = typer.Option(ssh.DEFAULT_TIMEOUT, help="Timeout SSH por host (s)."),
+    timeout: int = typer.Option(ssh.DEFAULT_TIMEOUT, help="SSH timeout per host (s)."),
 ) -> None:
-    """Painel de status: estado, uptime, carga, RAM, disco, containers e expiração."""
+    """Status board: state, uptime, load, RAM, disk, containers and expiry."""
     config = _load_config()
     selected = _require_ssh(_select_hosts(config, host))
     if not selected:
@@ -455,7 +482,7 @@ def status(
     if raw:
         for h in selected:
             if not h.status_command:
-                err_console.print(f"[yellow]{h.display}: sem status_command definido[/]")
+                err_console.print(f"[yellow]{h.display}: no status_command set[/]")
                 continue
             console.rule(f"[bold cyan]{h.display}[/]")
             try:
@@ -481,10 +508,10 @@ def status(
 
 @app.command()
 def resources(
-    host: str = typer.Argument(None, help="Host específico (padrão: todos)."),
-    timeout: int = typer.Option(ssh.DEFAULT_TIMEOUT, help="Timeout SSH por host (s)."),
+    host: str = typer.Argument(None, help="Specific host (default: all)."),
+    timeout: int = typer.Option(ssh.DEFAULT_TIMEOUT, help="SSH timeout per host (s)."),
 ) -> None:
-    """Detalhe de recursos: CPU/load, memória e disco com valores absolutos."""
+    """Resource detail: CPU/load, memory and disk with absolute values."""
     config = _load_config()
     selected = _require_ssh(_select_hosts(config, host))
     if not selected:
@@ -495,7 +522,7 @@ def resources(
         m: SystemMetrics = metrics[h.name]  # type: ignore[assignment]
         if not m.reachable:
             console.print(Panel(
-                Text(m.error or "inacessível", style="red"),
+                Text(m.error or "unreachable", style="red"),
                 title=f"[bold]{h.display}[/] [red]offline[/]",
                 border_style="red",
             ))
@@ -504,7 +531,7 @@ def resources(
         table = Table(show_header=False, box=None, pad_edge=False)
         table.add_column("k", style="dim")
         table.add_column("v")
-        table.add_row("SO", m.os or "—")
+        table.add_row("OS", m.os or "—")
         table.add_row("uptime", human_uptime(m.uptime_seconds))
         load_line = (
             f"{', '.join(f'{x:.2f}' for x in m.loadavg)}  ({m.cpus} CPUs"
@@ -515,7 +542,7 @@ def resources(
         if m.mem_total_kb:
             used = m.mem_total_kb - (m.mem_avail_kb or 0)
             table.add_row(
-                "memória",
+                "memory",
                 Text(
                     f"{human_kb(used)} / {human_kb(m.mem_total_kb)} ({m.mem_used_pct}%)",
                     style=pct_style(m.mem_used_pct),
@@ -523,7 +550,7 @@ def resources(
             )
         if m.disk_total_kb:
             table.add_row(
-                "disco /",
+                "disk /",
                 Text(
                     f"{human_kb(m.disk_used_kb)} / {human_kb(m.disk_total_kb)} "
                     f"({m.disk_pct}%)",
@@ -531,18 +558,18 @@ def resources(
                 ),
             )
         if m.docker_running is not None:
-            table.add_row("docker", f"{m.docker_running} rodando / {m.docker_total} total")
-        table.add_row("sessões", str(m.users) if m.users is not None else "—")
+            table.add_row("docker", f"{m.docker_running} running / {m.docker_total} total")
+        table.add_row("sessions", str(m.users) if m.users is not None else "—")
 
         console.print(Panel(table, title=f"[bold cyan]{h.display}[/]", border_style="cyan"))
 
 
 @app.command()
 def security(
-    host: str = typer.Argument(None, help="Host específico (padrão: todos)."),
-    timeout: int = typer.Option(ssh.DEFAULT_TIMEOUT, help="Timeout SSH por host (s)."),
+    host: str = typer.Argument(None, help="Specific host (default: all)."),
+    timeout: int = typer.Option(ssh.DEFAULT_TIMEOUT, help="SSH timeout per host (s)."),
 ) -> None:
-    """Auditoria de segurança: logins, falhas, portas, fail2ban e atualizações."""
+    """Security audit: logins, failures, ports, fail2ban and updates."""
     config = _load_config()
     selected = _require_ssh(_select_hosts(config, host))
     if not selected:
@@ -553,7 +580,7 @@ def security(
         s: SecurityMetrics = metrics[h.name]  # type: ignore[assignment]
         if not s.reachable:
             console.print(Panel(
-                Text(s.error or "inacessível", style="red"),
+                Text(s.error or "unreachable", style="red"),
                 title=f"[bold]{h.display}[/] [red]offline[/]",
                 border_style="red",
             ))
@@ -565,36 +592,36 @@ def security(
 
         fail_style = "green" if not s.failed_logins else (
             "bold red" if s.failed_logins > 50 else "yellow")
-        table.add_row("sessões ativas", str(s.users_now) if s.users_now is not None else "—")
+        table.add_row("active sessions", str(s.users_now) if s.users_now is not None else "—")
         table.add_row(
-            "falhas de login",
+            "failed logins",
             Text(str(s.failed_logins) if s.failed_logins is not None else "—",
                  style=fail_style),
         )
         if s.ports:
             ports = " ".join(str(p) for p in s.ports)
-            table.add_row("portas LISTEN", ports)
-        table.add_row("fail2ban", s.fail2ban or Text("não detectado", style="yellow"))
+            table.add_row("listening ports", ports)
+        table.add_row("fail2ban", s.fail2ban or Text("not detected", style="yellow"))
         if s.updates is not None:
             up_style = "green" if s.updates == 0 else "yellow"
-            table.add_row("atualizações", Text(str(s.updates), style=up_style))
+            table.add_row("updates", Text(str(s.updates), style=up_style))
         if s.reboot_required:
-            table.add_row("reboot", Text("necessário", style="bold red"))
+            table.add_row("reboot", Text("required", style="bold red"))
         if s.last_logins:
-            table.add_row("últimos logins", "\n".join(s.last_logins))
+            table.add_row("last logins", "\n".join(s.last_logins))
 
-        # veredito simples
+        # simple verdict
         warnings = []
         if s.failed_logins and s.failed_logins > 50:
-            warnings.append("muitas falhas de login")
+            warnings.append("many failed logins")
         if s.reboot_required:
-            warnings.append("reboot pendente")
+            warnings.append("reboot pending")
         if s.updates and s.updates > 0:
-            warnings.append(f"{s.updates} atualizações")
+            warnings.append(f"{s.updates} updates")
         verdict = (
-            Text("⚠ atenção: " + ", ".join(warnings), style="yellow")
+            Text("⚠ attention: " + ", ".join(warnings), style="yellow")
             if warnings
-            else Text("✔ sem alertas", style="green")
+            else Text("✔ no alerts", style="green")
         )
 
         border = "yellow" if warnings else "green"
@@ -602,12 +629,12 @@ def security(
                             border_style=border))
 
 
-# --- ciclo de vida: resolve config (manual) > API do provedor > RDAP ----------
+# --- lifecycle: resolve config (manual) > provider API > RDAP -----------------
 
-# provedores com cliente de API embutido. O valor MANUAL no config sempre vence
-# o que vem daqui — é o "caminho alternativo" para preços promocionais/legados.
-# Guardamos o *módulo* (não a função) para que `.fetch_servers` seja resolvido em
-# tempo de chamada — testes conseguem fazer monkeypatch dele.
+# Providers with a built-in API client. The MANUAL config value always wins over
+# what comes from here — it's the "fallback path" for promo/legacy prices. We store
+# the *module* (not the function) so `.fetch_servers` is resolved at call time —
+# letting tests monkeypatch it.
 _PROVIDER_CLIENTS = {
     "hetzner": hetzner,
     "vultr": vultr,
@@ -616,12 +643,12 @@ _PROVIDER_CLIENTS = {
 
 @dataclass
 class _Lifecycle:
-    """Valores efetivos de um host após mesclar config, API do provedor e RDAP."""
+    """A host's effective values after merging config, provider API and RDAP."""
 
     since: date | None = None
     since_auto: bool = False
-    cost: float | None = None  # custo mensal do servidor (normalizado)
-    cost_net: float | None = None  # net, quando difere do cobrado (via API)
+    cost: float | None = None  # monthly server cost (normalized)
+    cost_net: float | None = None  # net, when it differs from what's charged (via API)
     currency: str = "USD"
     cost_auto: bool = False
     domain_expiry: date | None = None
@@ -635,7 +662,7 @@ def _money(totals: dict[str, float]) -> str:
 
 
 def _monthly_by_currency(host: Host, lc: _Lifecycle) -> dict[str, float]:
-    """Custo mensal de servidor + domínio (servidor pode vir da API), por moeda."""
+    """Monthly cost of server + domain (server may come from the API), by currency."""
     totals: dict[str, float] = {}
     if lc.cost is not None:
         totals[lc.currency] = round(totals.get(lc.currency, 0.0) + lc.cost, 2)
@@ -648,7 +675,7 @@ def _monthly_by_currency(host: Host, lc: _Lifecycle) -> dict[str, float]:
 def _renewal_cell(
     expires: date | None, has_data: bool, config: Config, today: date
 ) -> Text:
-    """Célula 'faltam Xd  AAAA-MM-DD' colorida por limiar (ou '—')."""
+    """A 'Xd left  YYYY-MM-DD' cell colored by threshold (or '—')."""
     if expires is None and not has_data:
         return Text("—", style="dim")
     days = (expires - today).days if expires else None
@@ -662,14 +689,14 @@ def _renewal_cell(
 def _resolve_domain_expiries(
     hosts: list[Host], *, offline: bool, timeout: int
 ) -> dict[str, date | None]:
-    """Resolve a expiração de domínio de vários hosts (RDAP em paralelo)."""
+    """Resolve the domain expiry of several hosts (RDAP in parallel)."""
     resolved: dict[str, date | None] = {}
     pending: list[Host] = []
     for h in hosts:
         if h.domain is not None and h.domain.expires is not None:
             resolved[h.name] = h.domain.expires
         elif h.domain is not None and h.domain.name and not offline:
-            resolved[h.name] = None  # placeholder; será preenchido pelo RDAP
+            resolved[h.name] = None  # placeholder; filled by RDAP
             pending.append(h)
         else:
             resolved[h.name] = None
@@ -685,7 +712,7 @@ def _resolve_domain_expiries(
 
 
 def _referenced_providers(hosts: list[Host]) -> set[str]:
-    """Provedores citados explicitamente pelos hosts do config."""
+    """Providers explicitly named by the config hosts."""
     return {
         h.server.provider.lower()
         for h in hosts
@@ -694,7 +721,7 @@ def _referenced_providers(hosts: list[Host]) -> set[str]:
 
 
 def _api_providers(hosts: list[Host]) -> list[str]:
-    """Provedores a consultar: os referenciados no config + os que têm token salvo."""
+    """Providers to query: those referenced in config + those with a saved token."""
     referenced = _referenced_providers(hosts)
     with_token = {p for p in _PROVIDER_CLIENTS if secrets.get_token(p)}
     return sorted(referenced | with_token)
@@ -703,11 +730,11 @@ def _api_providers(hosts: list[Host]) -> list[str]:
 def _fetch_provider_servers(
     hosts: list[Host], *, timeout: int, discover: bool = False
 ) -> tuple[dict[str, dict[str, providers.ServerBilling]], list[str]]:
-    """Lista os servidores na API dos provedores. Devolve (dados, avisos).
+    """List servers from the provider APIs. Returns (data, notes).
 
-    Com ``discover=True`` consulta também todo provedor que tenha token salvo (não só
-    os citados no config) — é o que permite achar servidores sem nenhuma entrada no
-    TOML. Sem token, só avisa para os provedores realmente referenciados por um host.
+    With ``discover=True`` it also queries every provider that has a saved token (not
+    only those named in config) — this is what finds servers with no TOML entry at all.
+    Without a token, it only warns for providers actually referenced by a host.
     """
     servers: dict[str, dict[str, providers.ServerBilling]] = {}
     notes: list[str] = []
@@ -720,7 +747,7 @@ def _fetch_provider_servers(
         if not token:
             if prov in referenced:
                 notes.append(
-                    f"{prov}: sem token — rode `vordr secret set {prov}` para automatizar"
+                    f"{prov}: no token — run `vordr secret set {prov}` to automate"
                 )
             continue
         try:
@@ -731,10 +758,10 @@ def _fetch_provider_servers(
 
 
 def _discovered_host(prov: str, sb: providers.ServerBilling) -> Host:
-    """Host sintético a partir de um servidor achado na API (sem entrada no config).
+    """A synthetic host from a server found in the API (no config entry).
 
-    Sem ``ssh`` (logo, fora de status/resources/security); custo e ``since`` fluem da
-    API via :func:`_resolve_lifecycle`.
+    No ``ssh`` (so it's out of status/resources/security); cost and ``since`` flow from
+    the API via :func:`_resolve_lifecycle`.
     """
     return Host(
         name=sb.name,
@@ -752,7 +779,7 @@ def _assemble_rows(
     *,
     discover: bool,
 ) -> list[tuple[Host, _Lifecycle]]:
-    """Une hosts do config (enriquecidos pela API) com servidores só achados na API."""
+    """Join config hosts (enriched by the API) with servers found only in the API."""
     rows: list[tuple[Host, _Lifecycle]] = []
     claimed: set[tuple[str, str]] = set()
     for h in config_hosts:
@@ -773,7 +800,7 @@ def _assemble_rows(
 def _find_row(
     rows: list[tuple[Host, _Lifecycle]], name: str
 ) -> tuple[Host, _Lifecycle] | None:
-    """Acha a linha de um host por nome/label/alias SSH (config ou descoberto)."""
+    """Find a host's row by name/label/SSH alias (config or discovered)."""
     low = name.lower()
     for host, lc in rows:
         if low in {host.name.lower(), (host.label or "").lower(), host.ssh.lower()}:
@@ -784,7 +811,7 @@ def _find_row(
 def _match_server(
     host: Host, servers: dict[str, dict[str, providers.ServerBilling]]
 ) -> providers.ServerBilling | None:
-    """Casa um host com seu servidor na API (por provider_server, alias, nome ou label)."""
+    """Match a host to its API server (by provider_server, alias, name or label)."""
     catalog = servers.get((host.server.provider or "").lower())
     if not catalog:
         return None
@@ -825,13 +852,13 @@ def _age_text(lc: _Lifecycle, today: date) -> str:
 def _cost_table(
     rows: list[tuple[Host, _Lifecycle]], config: Config, today: date
 ) -> Table:
-    table = Table(title="Vordr · custo & ciclo de vida", title_style="bold cyan")
+    table = Table(title="Vordr · cost & lifecycle", title_style="bold cyan")
     table.add_column("host", style="bold")
-    table.add_column("provedor")
-    table.add_column("hospedando há")
-    table.add_column("servidor")
-    table.add_column("domínio")
-    table.add_column("custo/mês", justify="right")
+    table.add_column("provider")
+    table.add_column("hosting for")
+    table.add_column("server")
+    table.add_column("domain")
+    table.add_column("cost/mo", justify="right")
     for host, lc in rows:
         dom = host.domain
         dom_has = dom is not None and (dom.has_data or bool(dom.name))
@@ -852,57 +879,57 @@ def _cost_panel(host: Host, config: Config, today: date, lc: _Lifecycle) -> Pane
     table.add_column("k", style="dim")
     table.add_column("v")
 
-    table.add_row("provedor", srv.provider or "—")
+    table.add_row("provider", srv.provider or "—")
     age_line = Text(_age_text(lc, today))
     if lc.since:
-        age_line.append(f"  (desde {lc.since.isoformat()})", style="dim")
+        age_line.append(f"  (since {lc.since.isoformat()})", style="dim")
         if lc.since_auto:
             age_line.append("  (API)", style="dim italic")
-    table.add_row("hospedando há", age_line)
+    table.add_row("hosting for", age_line)
 
-    table.add_row("servidor renova", _renewal_cell(srv.expires, srv.has_data, config, today))
+    table.add_row("server renews", _renewal_cell(srv.expires, srv.has_data, config, today))
     if lc.cost is not None:
-        money = Text(f"{lc.currency} {lc.cost:.2f} / mês", style="dim")
+        money = Text(f"{lc.currency} {lc.cost:.2f} / mo", style="dim")
         if lc.cost_auto:
             money.append("  (API)", style="dim italic")
         table.add_row("", money)
         if lc.cost_net is not None:
-            table.add_row("", Text(f"líquido {lc.currency} {lc.cost_net:.2f}", style="dim"))
+            table.add_row("", Text(f"net {lc.currency} {lc.cost_net:.2f}", style="dim"))
 
     if dom is not None and (lc.domain_expiry is not None or dom.has_data or dom.name):
         cell = _renewal_cell(lc.domain_expiry, dom.has_data or bool(dom.name), config, today)
         if lc.domain_expiry_auto:
             cell.append("  (RDAP)", style="dim italic")
-        table.add_row("domínio expira", cell)
+        table.add_row("domain expires", cell)
         detail = " · ".join(p for p in (dom.name, dom.provider) if p)
         if detail:
             table.add_row("", Text(detail, style="dim"))
         if dom.cost is not None:
             table.add_row("", Text(f"{dom.currency} {dom.cost:.2f} / {dom.cycle}", style="dim"))
     else:
-        table.add_row("domínio", Text("não configurado", style="dim"))
+        table.add_row("domain", Text("not set", style="dim"))
 
-    table.add_row("custo/mês", Text(_money(_monthly_by_currency(host, lc)), style="bold"))
+    table.add_row("cost/mo", Text(_money(_monthly_by_currency(host, lc)), style="bold"))
     return Panel(table, title=f"[bold cyan]{host.display}[/]", border_style="cyan")
 
 
 @app.command()
 def cost(
     host: str = typer.Argument(
-        None, help="Host específico → painel detalhado (padrão: tabela de todos)."
+        None, help="Specific host → detailed panel (default: table of all)."
     ),
     offline: bool = typer.Option(
-        False, "--offline", help="Não consultar rede (RDAP/API); usa só o config."
+        False, "--offline", help="Don't query the network (RDAP/API); use the config only."
     ),
     timeout: int = typer.Option(
-        rdap.DEFAULT_TIMEOUT, help="Timeout das consultas de rede — RDAP e API (s)."
+        rdap.DEFAULT_TIMEOUT, help="Network query timeout — RDAP and API (s)."
     ),
 ) -> None:
-    """Custo & ciclo de vida: hospedagem, renovação do servidor e do domínio.
+    """Cost & lifecycle: hosting, server renewal and domain expiry.
 
-    Com um token salvo, **descobre os servidores da conta** automaticamente — o config é
-    opcional. Os valores do config sempre vencem; o que faltar vem da API (custo/``since``)
-    e do RDAP (expiração do domínio). Use ``--offline`` para usar só o config, sem rede.
+    With a saved token it **discovers the account's servers** automatically — the config
+    is optional. Config values always win; whatever's missing comes from the API
+    (cost/``since``) and RDAP (domain expiry). Use ``--offline`` for config only, no network.
     """
     config = _load_config(require_hosts=False)
     today = date.today()
@@ -921,9 +948,9 @@ def cost(
 
     if not rows:
         console.print(
-            "[yellow]Nada para mostrar.[/] Configure um token "
-            "([bold]vordr secret set hetzner|vultr[/]) para descobrir os servidores "
-            "pela API, ou [bold]vordr init[/] para declarar hosts via SSH."
+            "[yellow]Nothing to show.[/] Set a token "
+            "([bold]vordr secret set hetzner|vultr[/]) to discover servers via the API, "
+            "or [bold]vordr init[/] to declare hosts over SSH."
         )
         for note in notes:
             console.print(f"[dim yellow]{note}[/]")
@@ -932,8 +959,8 @@ def cost(
     if host:
         row = _find_row(rows, host)
         if row is None:
-            known = ", ".join(sorted(h.display for h, _ in rows)) or "(nenhum)"
-            err_console.print(f"[bold red]host '{host}' não encontrado.[/] Conhecidos: {known}")
+            known = ", ".join(sorted(h.display for h, _ in rows)) or "(none)"
+            err_console.print(f"[bold red]host '{host}' not found.[/] Known: {known}")
             raise typer.Exit(2)
         console.print(_cost_panel(row[0], config, today, row[1]))
     else:
@@ -954,11 +981,11 @@ def cost(
                 missing.append(h.display)
 
         if totals:
-            console.print(f"[bold]total mensal estimado:[/] {_money(totals)}")
+            console.print(f"[bold]estimated monthly total:[/] {_money(totals)}")
         if missing:
             console.print(
-                f"[dim]sem dados de cobrança: {', '.join(missing)} — "
-                f"edite {config.source or config_path()} (ou rode `vordr init`).[/dim]"
+                f"[dim]no billing data: {', '.join(missing)} — "
+                f"edit {config.source or config_path()} (or run `vordr init`).[/dim]"
             )
 
     for prov in sorted(accounts):
@@ -969,10 +996,10 @@ def cost(
         console.print(f"[dim yellow]{note}[/]")
 
 
-# --- saldo & cobrança por provedor -------------------------------------------
+# --- balance & billing per provider ------------------------------------------
 
 def _billing_model(prov: str) -> str:
-    """'prepaid' (crédito/saldo) ou 'postpaid' (cartão) — declarado pelo módulo."""
+    """'prepaid' (credit/balance) or 'postpaid' (card) — declared by the module."""
     return getattr(_PROVIDER_CLIENTS.get(prov), "BILLING_MODEL", "postpaid")
 
 
@@ -985,16 +1012,16 @@ def _first_of_next_month(today: date) -> date:
 def _fetch_provider_accounts(
     hosts: list[Host], *, timeout: int
 ) -> tuple[dict[str, providers.AccountBilling], list[str]]:
-    """Saldo das contas dos provedores referenciados que expõem ``fetch_account``."""
+    """Account balance for providers that expose ``fetch_account``."""
     accounts: dict[str, providers.AccountBilling] = {}
     notes: list[str] = []
     for prov in _api_providers(hosts):
         client = _PROVIDER_CLIENTS[prov]
         if not hasattr(client, "fetch_account"):
-            continue  # provedor postpago — sem saldo via API
+            continue  # postpaid provider — no balance via API
         token = secrets.get_token(prov)
         if not token:
-            continue  # token faltando já é avisado pelo fetch de servidores
+            continue  # a missing token is already flagged by the server fetch
         try:
             accounts[prov] = client.fetch_account(token, timeout=timeout)
         except providers.ProviderError as exc:
@@ -1005,7 +1032,7 @@ def _fetch_provider_accounts(
 def _provider_monthly_burn(
     rows: list[tuple[Host, _Lifecycle]], prov: str
 ) -> tuple[float | None, str | None]:
-    """Soma o custo mensal dos hosts de um provedor (o 'burn' que consome o saldo)."""
+    """Sum the monthly cost of a provider's hosts (the 'burn' that eats the balance)."""
     total, currency, found = 0.0, None, False
     for host, lc in rows:
         if (host.server.provider or "").lower() != prov:
@@ -1020,7 +1047,7 @@ def _provider_monthly_burn(
 def _runway(
     net_remaining: float | None, monthly_burn: float | None, today: date
 ) -> tuple[int | None, date | None]:
-    """Dias até o crédito esgotar, dado o consumo mensal."""
+    """Days until the credit runs out, given the monthly burn."""
     if net_remaining is None or not monthly_burn or monthly_burn <= 0:
         return None, None
     daily = monthly_burn / 30.0
@@ -1031,16 +1058,16 @@ def _runway(
 def _billing_summary_line(
     prov: str, acct: providers.AccountBilling, burn: float | None, today: date
 ) -> str:
-    """Linha curta para o rodapé do `cost` (crédito + runway)."""
+    """Short line for the `cost` footer (credit + runway)."""
     parts = [f"[bold]{prov.capitalize()}[/]"]
     cr = acct.credit
     if cr is not None:
-        parts.append(f"crédito {acct.currency} {cr:.2f}")
+        parts.append(f"credit {acct.currency} {cr:.2f}")
     if acct.pending_charges:
-        parts.append(f"pendente {acct.currency} {acct.pending_charges:.2f}")
+        parts.append(f"pending {acct.currency} {acct.pending_charges:.2f}")
     net = acct.net_remaining
     if net is not None:
-        parts.append(f"líquido {acct.currency} {net:.2f}")
+        parts.append(f"net {acct.currency} {net:.2f}")
     days, runout = _runway(net, burn, today)
     if days is not None and runout is not None:
         parts.append(f"runway ~{days}d → {runout.isoformat()}")
@@ -1059,53 +1086,53 @@ def _billing_panel(
     table = Table(show_header=False, box=None, pad_edge=False)
     table.add_column("k", style="dim")
     table.add_column("v")
-    table.add_row("provedor", prov.capitalize())
+    table.add_row("provider", prov.capitalize())
 
     if _billing_model(prov) == "prepaid":
-        table.add_row("modelo", "pré-pago (crédito/saldo)")
+        table.add_row("model", "prepaid (credit/balance)")
         if acct is None:
             if offline:
-                detail = Text("— (modo offline)", style="dim")
+                detail = Text("— (offline)", style="dim")
             elif not secrets.get_token(prov):
-                detail = Text(f"sem token — rode `vordr secret set {prov}`", style="yellow")
+                detail = Text(f"no token — run `vordr secret set {prov}`", style="yellow")
             else:
-                detail = Text("indisponível", style="dim")
-            table.add_row("saldo", detail)
+                detail = Text("unavailable", style="dim")
+            table.add_row("balance", detail)
         else:
             cr = acct.credit
             if cr is not None:
-                table.add_row("crédito", f"{acct.currency} {cr:.2f}")
+                table.add_row("credit", f"{acct.currency} {cr:.2f}")
             if acct.pending_charges:
-                table.add_row("pendente", f"{acct.currency} {acct.pending_charges:.2f}")
+                table.add_row("pending", f"{acct.currency} {acct.pending_charges:.2f}")
             net = acct.net_remaining
             if net is not None:
-                table.add_row("líquido", Text(f"{acct.currency} {net:.2f}", style="bold"))
+                table.add_row("net", Text(f"{acct.currency} {net:.2f}", style="bold"))
             days, runout = _runway(net, burn, today)
             if days is not None and runout is not None:
                 style = days_left_style(days, warn=config.warn_days, critical=config.critical_days)
                 table.add_row(
                     "runway",
-                    Text(f"~{days} dias  (esgota {runout.isoformat()})", style=style),
+                    Text(f"~{days} days  (runs out {runout.isoformat()})", style=style),
                 )
                 table.add_row(
-                    "cobrança", Text("via crédito — sem cartão até o saldo esgotar", style="dim")
+                    "billing", Text("on credit — no card until the balance runs out", style="dim")
                 )
             else:
-                table.add_row("cobrança", Text("via crédito", style="dim"))
-    else:  # postpago — cobrado no cartão, calendário fixo
-        table.add_row("modelo", "postpago (cartão)")
+                table.add_row("billing", Text("on credit", style="dim"))
+    else:  # postpaid — charged to the card, fixed calendar
+        table.add_row("model", "postpaid (card)")
         nxt = _first_of_next_month(today)
         days = (nxt - today).days
-        est = f"  (≈ {currency} {burn:.2f} / mês)" if burn is not None and currency else ""
+        est = f"  (≈ {currency} {burn:.2f} / mo)" if burn is not None and currency else ""
         table.add_row(
-            "próxima cobrança",
+            "next charge",
             Text(
-                f"{nxt.isoformat()}  (em {days}d){est}",
+                f"{nxt.isoformat()}  (in {days}d){est}",
                 style=days_left_style(days, warn=config.warn_days, critical=config.critical_days),
             ),
         )
         table.add_row(
-            "saldo", Text(f"— (não exposto pela API da {prov.capitalize()})", style="dim")
+            "balance", Text(f"— (not exposed by the {prov.capitalize()} API)", style="dim")
         )
 
     return Panel(table, title=f"[bold cyan]{prov.capitalize()}[/]", border_style="cyan")
@@ -1114,17 +1141,17 @@ def _billing_panel(
 @app.command()
 def billing(
     offline: bool = typer.Option(
-        False, "--offline", help="Não consultar a API; mostra só o modelo de cobrança."
+        False, "--offline", help="Don't query the API; show only the billing model."
     ),
     timeout: int = typer.Option(
-        rdap.DEFAULT_TIMEOUT, help="Timeout das consultas à API do provedor (s)."
+        rdap.DEFAULT_TIMEOUT, help="Provider API query timeout (s)."
     ),
 ) -> None:
-    """Saldo, crédito e próxima cobrança de cada provedor.
+    """Balance, credit and next charge per provider.
 
-    Para provedores pré-pagos (ex.: Vultr) mostra crédito, uso pendente e o
-    *runway* — quando o saldo esgota e a cobrança no cartão começa. Para postpagos
-    (ex.: Hetzner) mostra a próxima data de cobrança e o custo estimado.
+    For prepaid providers (e.g. Vultr) it shows credit, pending usage and the
+    *runway* — when the balance runs out and the card charges begin. For postpaid ones
+    (e.g. Hetzner) it shows the next charge date and the estimated cost.
     """
     config = _load_config(require_hosts=False)
     hosts = list(config.hosts.values())
@@ -1145,8 +1172,8 @@ def billing(
     )
     if not providers_seen:
         console.print(
-            "[yellow]Nenhum provedor de API para mostrar.[/] Configure um token "
-            '([bold]vordr secret set hetzner|vultr[/]) ou defina provider = "Hetzner"/"Vultr".'
+            "[yellow]No API provider to show.[/] Set a token "
+            '([bold]vordr secret set hetzner|vultr[/]) or set provider = "Hetzner"/"Vultr".'
         )
         for note in notes:
             console.print(f"[dim yellow]{note}[/]")
@@ -1168,14 +1195,17 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def main(
+    ctx: typer.Context,
     version: bool = typer.Option(
         False, "--version", "-V", callback=_version_callback, is_eager=True,
-        help="Mostra a versão e sai.",
+        help="Show the version and exit.",
     ),
 ) -> None:
-    """Vordr monta guarda diante dos seus servidores."""
+    """Vordr stands guard over your servers."""
+    if ctx.invoked_subcommand is None:
+        _splash()
 
 
 if __name__ == "__main__":  # pragma: no cover

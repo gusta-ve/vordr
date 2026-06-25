@@ -1,12 +1,12 @@
-"""Configuração do Vordr.
+"""Vordr configuration.
 
-A configuração vive em ``~/.config/vordr/config.toml`` (ou em ``$VORDR_CONFIG``).
-Você descreve quais hosts monitorar; rode ``vordr init`` para gerar um arquivo
-comentado de exemplo. Sem hosts configurados não há o que vigiar.
+The configuration lives in ``~/.config/vordr/config.toml`` (or ``$VORDR_CONFIG``).
+You describe which hosts to watch; run ``vordr init`` to generate a commented
+example. With no hosts configured there is nothing to watch.
 
-Nada de IPs nem segredos aqui: os hosts são apenas *aliases* do seu SSH config.
-Datas de cobrança/expiração são informadas por você, pois não há como o servidor
-saber quando o provedor vai cobrar de novo.
+No IPs or secrets here: hosts are just *aliases* from your SSH config. Billing/expiry
+dates are supplied by you — the server has no way to know when a provider will charge
+again.
 """
 
 from __future__ import annotations
@@ -19,25 +19,25 @@ from pathlib import Path
 
 
 class ConfigError(RuntimeError):
-    """Configuração inválida ou mal formada."""
+    """Invalid or malformed configuration."""
 
 
 @dataclass
 class Subscription:
-    """Uma assinatura com renovação/expiração (servidor ou domínio).
+    """A subscription with a renewal/expiry (server or domain).
 
-    Os campos são preenchidos por você no ``config.toml`` — o servidor não tem
-    como saber quando o provedor ou o registrar vão cobrar de novo.
+    Fields are filled in by you in ``config.toml`` — the server has no way to know
+    when the provider or registrar will charge again.
     """
 
     expires: date | None = None
     cost: float | None = None
     currency: str = "USD"
     cycle: str = "monthly"  # monthly | yearly
-    provider: str | None = None  # provedor (servidor) ou registrar (domínio)
-    provider_ref: str | None = None  # nome/id do servidor na API do provedor
-    name: str | None = None  # nome do domínio (só faz sentido no domínio)
-    since: date | None = None  # desde quando você mantém (tempo de hospedagem)
+    provider: str | None = None  # provider (server) or registrar (domain)
+    provider_ref: str | None = None  # server name/id in the provider's API
+    name: str | None = None  # domain name (only meaningful for the domain)
+    since: date | None = None  # since when you've kept it (hosting age)
 
     def days_left(self, today: date | None = None) -> int | None:
         if self.expires is None:
@@ -46,7 +46,7 @@ class Subscription:
         return (self.expires - today).days
 
     def age_days(self, today: date | None = None) -> int | None:
-        """Dias decorridos desde ``since`` (ex.: tempo de hospedagem)."""
+        """Days elapsed since ``since`` (e.g. hosting age)."""
         if self.since is None:
             return None
         today = today or date.today()
@@ -67,7 +67,7 @@ class Subscription:
 
 @dataclass
 class Host:
-    """Um servidor monitorado pelo Vordr."""
+    """A server watched by Vordr."""
 
     name: str
     ssh: str
@@ -92,8 +92,8 @@ class Config:
         try:
             return self.hosts[name]
         except KeyError:
-            known = ", ".join(self.hosts) or "(nenhum)"
-            raise ConfigError(f"host '{name}' não configurado. Conhecidos: {known}") from None
+            known = ", ".join(self.hosts) or "(none)"
+            raise ConfigError(f"host '{name}' not configured. Known: {known}") from None
 
 
 # --- paths -----------------------------------------------------------------
@@ -117,19 +117,19 @@ def _parse_date(value: object, ctx: str) -> date | None:
         try:
             return date.fromisoformat(value.strip())
         except ValueError:
-            raise ConfigError(f"{ctx}: data inválida '{value}' (use AAAA-MM-DD)") from None
-    raise ConfigError(f"{ctx}: data inválida '{value!r}'")
+            raise ConfigError(f"{ctx}: invalid date '{value}' (use YYYY-MM-DD)") from None
+    raise ConfigError(f"{ctx}: invalid date '{value!r}'")
 
 
 def _parse_subscription(raw: dict, ctx: str, *, is_domain: bool = False) -> Subscription:
     if not isinstance(raw, dict):
-        raise ConfigError(f"{ctx} deve ser uma tabela")
+        raise ConfigError(f"{ctx} must be a table")
     return Subscription(
         expires=_parse_date(raw.get("expires"), f"{ctx}.expires"),
         cost=raw.get("cost"),
         currency=raw.get("currency", "USD"),
         cycle=raw.get("cycle", "monthly"),
-        # domínio usa "registrar"; servidor usa "provider".
+        # the domain uses "registrar"; the server uses "provider".
         provider=raw.get("registrar") if is_domain else raw.get("provider"),
         provider_ref=None if is_domain else raw.get("provider_server"),
         name=raw.get("name") if is_domain else None,
@@ -139,9 +139,9 @@ def _parse_subscription(raw: dict, ctx: str, *, is_domain: bool = False) -> Subs
 
 def _parse_host(name: str, raw: dict) -> Host:
     if not isinstance(raw, dict):
-        raise ConfigError(f"host '{name}' deve ser uma tabela [hosts.{name}]")
+        raise ConfigError(f"host '{name}' must be a table [hosts.{name}]")
     ssh_alias = raw.get("ssh", name)
-    # [hosts.X.server] é o nome atual; aceitamos [hosts.X.billing] por compat.
+    # [hosts.X.server] is the current name; we accept [hosts.X.billing] for compat.
     server_raw = raw.get("server", raw.get("billing", {}))
     domain_raw = raw.get("domain")
     return Host(
@@ -159,10 +159,10 @@ def _parse_host(name: str, raw: dict) -> Host:
 
 
 def parse(data: dict, *, source: Path | None = None) -> Config:
-    """Constrói um :class:`Config` a partir de um dicionário TOML já carregado."""
+    """Build a :class:`Config` from an already-loaded TOML dict."""
     hosts_raw = data.get("hosts", {})
     if not isinstance(hosts_raw, dict):
-        raise ConfigError("seção [hosts] inválida")
+        raise ConfigError("invalid [hosts] section")
 
     hosts = {name: _parse_host(name, raw) for name, raw in hosts_raw.items()}
 
@@ -176,7 +176,7 @@ def parse(data: dict, *, source: Path | None = None) -> Config:
 
 
 def load(path: Path | None = None) -> Config:
-    """Carrega a configuração do disco; usa os padrões embutidos se não existir."""
+    """Load config from disk; returns an empty config if it doesn't exist."""
     path = path or config_path()
     if not path.exists():
         return Config(hosts={})
@@ -184,5 +184,5 @@ def load(path: Path | None = None) -> Config:
         with path.open("rb") as fh:
             data = tomllib.load(fh)
     except tomllib.TOMLDecodeError as exc:
-        raise ConfigError(f"{path}: TOML inválido — {exc}") from exc
+        raise ConfigError(f"{path}: invalid TOML — {exc}") from exc
     return parse(data, source=path)

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "vordr"
 dynamic = ["version"]
-description = "Guardião dos servidores — monitoramento de status, recursos, custo/expiração e segurança de hosts Linux via SSH."
+description = "The warden of your servers — status, resources, cost/expiry and security of Linux hosts over SSH."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
@@ -38,10 +38,10 @@ Issues = "https://github.com/gusta-ve/vordr/issues"
 vordr = "vordr.cli:app"
 
 [tool.hatch.version]
-path = "vordr/__init__.py"
+path = "src/vordr/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["vordr"]
+packages = ["src/vordr"]
 
 [tool.ruff]
 line-length = 100
@@ -51,9 +51,10 @@ target-version = "py311"
 select = ["E", "F", "I", "UP", "B", "W"]
 
 [tool.ruff.lint.per-file-ignores]
-# probe.py embute scripts shell (awk one-liners) que não cabem em 100 colunas.
-"vordr/probe.py" = ["E501"]
+# probe.py embeds shell scripts (awk one-liners) that don't fit in 100 columns.
+"src/vordr/probe.py" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 addopts = "-q"

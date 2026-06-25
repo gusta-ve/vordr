@@ -43,7 +43,7 @@ def test_domain_expiry_fetches_then_caches(monkeypatch, tmp_path):
 
     # primeira chamada bate na "rede"
     assert rdap.domain_expiry("github.com") == date(2026, 10, 9)
-    # segunda usa o cache (não chama _fetch de novo)
+    # second uses the cache (doesn't call _fetch again)
     assert rdap.domain_expiry("github.com") == date(2026, 10, 9)
     assert calls["n"] == 1
 
@@ -59,7 +59,7 @@ def test_concurrent_fetches_all_land_in_cache(monkeypatch, tmp_path):
     with ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(lambda d: rdap.domain_expiry(d), domains))
 
-    # cache válido e com todos os domínios (nenhum clobberou o outro)
+    # cache valid with all domains (none clobbered the other)
     with rdap._cache_path().open() as fh:
         cache = json.load(fh)
     assert set(cache) == set(domains)
@@ -81,6 +81,6 @@ def test_domain_expiry_stale_cache_on_failure(monkeypatch, tmp_path):
     monkeypatch.setattr(rdap, "_fetch", lambda name, timeout: date(2026, 10, 9))
     rdap.domain_expiry("exemplo.com", now=0.0)
 
-    # rede cai e o cache está "vencido" (now muito à frente): usa o stale mesmo assim
+    # network down and the cache is "stale" (now far ahead): use the stale entry anyway
     monkeypatch.setattr(rdap, "_fetch", lambda name, timeout: (_ for _ in ()).throw(OSError()))
     assert rdap.domain_expiry("exemplo.com", now=10**12) == date(2026, 10, 9)

@@ -1,9 +1,9 @@
-"""Tokens de API de provedores — guardados *fora* do repositório.
+"""Provider API tokens — stored *outside* the repository.
 
-Precedência de leitura: **variável de ambiente > arquivo de segredos**. O arquivo
-(``~/.config/vordr/secrets.toml`` ou ``$VORDR_SECRETS``) é criado com permissão
-``600`` e está no ``.gitignore``. Configure-o com ``vordr secret set <provedor>`` —
-o Vordr nunca lê tokens do config versionado.
+Read precedence: **environment variable > secrets file**. The file
+(``~/.config/vordr/secrets.toml`` or ``$VORDR_SECRETS``) is created with ``600``
+permissions and is in ``.gitignore``. Configure it with ``vordr secret set <provider>``
+— Vordr never reads tokens from the versioned config.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import os
 import tomllib
 from pathlib import Path
 
-# provedor -> variável de ambiente equivalente (a do env tem prioridade)
+# provider -> equivalent environment variable (the env one takes precedence)
 ENV_VARS = {
     "hetzner": "HCLOUD_TOKEN",
     "vultr": "VULTR_API_KEY",
@@ -39,7 +39,7 @@ def _load() -> dict:
 
 
 def get_token(provider: str) -> str | None:
-    """Token do provedor: env primeiro, senão o arquivo de segredos."""
+    """Provider token: env first, otherwise the secrets file."""
     provider = provider.lower()
     env_name = ENV_VARS.get(provider)
     if env_name:
@@ -51,7 +51,7 @@ def get_token(provider: str) -> str | None:
 
 
 def token_source(provider: str) -> str | None:
-    """De onde viria o token: ``"env"``, ``"file"`` ou ``None`` — sem revelá-lo."""
+    """Where the token would come from: ``"env"``, ``"file"`` or ``None`` — without revealing it."""
     provider = provider.lower()
     env_name = ENV_VARS.get(provider)
     if env_name and os.environ.get(env_name, "").strip():
@@ -63,7 +63,7 @@ def token_source(provider: str) -> str | None:
 
 
 def set_token(provider: str, token: str) -> Path:
-    """Grava o token no arquivo de segredos (chmod 600). Devolve o caminho."""
+    """Write the token to the secrets file (chmod 600). Returns the path."""
     provider = provider.lower()
     data = _load()
     tokens = data.get("tokens", {})
@@ -72,7 +72,7 @@ def set_token(provider: str, token: str) -> Path:
     tokens[provider] = token.strip()
     path = secrets_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    lines = ["# Segredos do Vordr — NÃO versionar. Gerencie com `vordr secret`.", "", "[tokens]"]
+    lines = ["# Vordr secrets — DO NOT commit. Manage with `vordr secret`.", "", "[tokens]"]
     for key, value in sorted(tokens.items()):
         esc = str(value).replace("\\", "\\\\").replace('"', '\\"')
         lines.append(f'{key} = "{esc}"')
@@ -82,7 +82,7 @@ def set_token(provider: str, token: str) -> Path:
 
 
 def mask(token: str) -> str:
-    """Mostra só o suficiente pra reconhecer o token, sem expô-lo."""
+    """Show just enough to recognize the token, without exposing it."""
     token = token.strip()
     if len(token) <= 8:
         return "•" * len(token)

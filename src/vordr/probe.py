@@ -1,9 +1,9 @@
-"""Coleta de métricas estruturadas dos hosts.
+"""Structured metric collection from hosts.
 
-Em vez de tentar parsear a saída colorida de um script de status existente
-(frágil, cheia de ANSI), Vordr roda pequenos scripts ``sh`` portáveis no servidor que emitem
-linhas ``CHAVE=valor``. Isso é estável, fácil de testar e permite aplicar
-limiares (load alto, disco cheio, etc.).
+Instead of trying to parse the colored output of an existing status script (fragile,
+full of ANSI), Vordr runs small portable ``sh`` scripts on the server that emit
+``KEY=value`` lines. This is stable, easy to test and lets us apply thresholds
+(high load, full disk, etc.).
 """
 
 from __future__ import annotations
@@ -12,8 +12,8 @@ from dataclasses import dataclass, field
 
 from . import ssh
 
-# Script de métricas de sistema. Mantido portável (POSIX sh + /proc) e tolerante
-# a comandos ausentes — cada peça falha em silêncio em vez de derrubar tudo.
+# System metrics script. Kept portable (POSIX sh + /proc) and tolerant of missing
+# commands — each piece fails silently instead of taking everything down.
 _SYSTEM_PROBE = r"""
 echo "HOSTNAME=$(hostname 2>/dev/null)"
 if [ -r /proc/uptime ]; then echo "UPTIME_SECONDS=$(cut -d. -f1 /proc/uptime)"; fi
@@ -31,17 +31,17 @@ if command -v docker >/dev/null 2>&1; then
 fi
 """
 
-# Script de segurança. Best-effort: usa `sudo -n` (não-interativo) e descarta
-# erros, marcando como indisponível o que exigir privilégio inexistente.
+# Security script. Best-effort: uses `sudo -n` (non-interactive) and discards errors,
+# marking as unavailable whatever requires a privilege that isn't there.
 _SECURITY_PROBE = r"""
 echo "USERS_NOW=$(who 2>/dev/null | wc -l | tr -d ' ')"
 
-# Últimos logins bem-sucedidos
+# Last successful logins
 last -n 3 2>/dev/null | grep -v '^$' | grep -vi 'wtmp begins' | head -n 3 | while IFS= read -r l; do
   echo "LAST_LOGIN=$l"
 done
 
-# Falhas de autenticação (tenta lastb com sudo -n; senão, journald)
+# Authentication failures (try lastb with sudo -n; otherwise journald)
 FAILED=""
 if command -v lastb >/dev/null 2>&1; then
   FAILED=$(sudo -n lastb 2>/dev/null | grep -v '^$' | grep -vi 'btmp begins' | wc -l | tr -d ' ')
@@ -54,7 +54,7 @@ if [ -z "$FAILED" ] || [ "$FAILED" = "0" ]; then
 fi
 [ -n "$FAILED" ] && echo "FAILED_LOGINS=$FAILED"
 
-# Portas TCP em escuta (porta única, deduplicada)
+# Listening TCP ports (single port, deduplicated)
 if command -v ss >/dev/null 2>&1; then
   ss -H -ltn 2>/dev/null | awk '{print $4}' | sed 's/.*://' | sort -un | tr '\n' ' ' | sed 's/^/PORTS=/'
   echo ""
@@ -63,10 +63,10 @@ fi
 # fail2ban
 if command -v fail2ban-client >/dev/null 2>&1; then
   J=$(sudo -n fail2ban-client status 2>/dev/null | grep 'Jail list' | sed 's/.*:\s*//')
-  if [ -n "$J" ]; then echo "FAIL2BAN=$J"; else echo "FAIL2BAN=ativo (sem detalhe: requer sudo)"; fi
+  if [ -n "$J" ]; then echo "FAIL2BAN=$J"; else echo "FAIL2BAN=active (no detail: needs sudo)"; fi
 fi
 
-# Atualizações pendentes / reboot necessário
+# Pending updates / reboot required
 if command -v apt-get >/dev/null 2>&1; then
   U=$(apt-get -s -o Debug::NoLocking=true upgrade 2>/dev/null | grep -c '^Inst')
   echo "UPDATES=$U"
@@ -83,7 +83,7 @@ def _to_int(value: str) -> int | None:
 
 
 def _parse_kv(stdout: str) -> dict[str, list[str]]:
-    """Converte linhas ``CHAVE=valor`` num dict; chaves repetidas viram listas."""
+    """Turn ``KEY=value`` lines into a dict; repeated keys become lists."""
     out: dict[str, list[str]] = {}
     for line in stdout.splitlines():
         if "=" not in line:
@@ -157,13 +157,13 @@ def _parse_loadavg(raw: str) -> tuple[float, float, float] | None:
 
 
 def probe_system(alias: str, *, timeout: int = ssh.DEFAULT_TIMEOUT) -> SystemMetrics:
-    """Coleta métricas de sistema de um host."""
+    """Collect system metrics from a host."""
     try:
         result = ssh.run(alias, _SYSTEM_PROBE, timeout=timeout)
     except ssh.SSHError as exc:
         return SystemMetrics(reachable=False, error=str(exc))
     if not result.ok:
-        msg = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "falha SSH"
+        msg = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "SSH failure"
         return SystemMetrics(reachable=False, error=msg)
 
     kv = _parse_kv(result.stdout)
@@ -191,13 +191,13 @@ def probe_system(alias: str, *, timeout: int = ssh.DEFAULT_TIMEOUT) -> SystemMet
 
 
 def probe_security(alias: str, *, timeout: int = ssh.DEFAULT_TIMEOUT) -> SecurityMetrics:
-    """Coleta sinais de segurança de um host (best-effort, sem exigir sudo)."""
+    """Collect security signals from a host (best-effort, no sudo required)."""
     try:
         result = ssh.run(alias, _SECURITY_PROBE, timeout=timeout)
     except ssh.SSHError as exc:
         return SecurityMetrics(reachable=False, error=str(exc))
     if not result.ok and not result.stdout.strip():
-        msg = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "falha SSH"
+        msg = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "SSH failure"
         return SecurityMetrics(reachable=False, error=msg)
 
     kv = _parse_kv(result.stdout)

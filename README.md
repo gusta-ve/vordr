@@ -1,91 +1,90 @@
 # Vordr 🐺
 
-> _Na mitologia nórdica, **Vörðr** é o espírito-guardião que acompanha cada pessoa do
-> nascimento à morte, vigiando-a sem descanso. Aqui, Vordr monta guarda diante dos
-> seus servidores._
+> _In Norse lore, the **Vörðr** is the guardian spirit that follows each person from
+> birth to death, watching without rest. Here, Vordr stands guard over your servers._
 
-**Vordr** é uma CLI que vigia seus hosts Linux por SSH e responde, num só lugar, às
-perguntas que importam no dia a dia:
+**Vordr** is a CLI that watches your Linux hosts over SSH and answers, in one place,
+the questions that matter day to day:
 
-- **Estão de pé?** — estado, uptime, carga, RAM, disco e containers de todos os hosts.
-- **Vou ser cobrado?** — há quanto tempo você hospeda cada host, quando o
-  **servidor** renova e quando o **domínio** expira, e quanto você gasta por mês.
-  _O recurso que evita a cobrança surpresa._
-- **Estão seguros?** — falhas de login, portas em escuta, fail2ban, atualizações
-  pendentes e necessidade de reboot.
+- **Are they up?** — state, uptime, load, RAM, disk and containers for every host.
+- **Will I be charged?** — how long you've hosted each one, when the **server** renews
+  and when the **domain** expires, and how much you spend per month.
+  _The feature that prevents the surprise charge._
+- **Are they secure?** — failed logins, listening ports, fail2ban, pending updates and
+  reboot-required.
 
-Sem agentes instalados nos servidores, sem banco de dados, sem segredos no código:
-Vordr só precisa do seu `~/.ssh/config`.
+No agents installed on the servers, no database, no secrets in the code: Vordr only
+needs your `~/.ssh/config`.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│ Vordr · status dos servidores                                          │
+│ Vordr · server status                                                  │
 ├───────────┬──────────┬─────────┬──────┬─────┬───────┬────────┬─────────┤
-│ host      │ estado   │ uptime  │ load │ ram │ disco │ docker │ expira  │
+│ host      │ state    │ uptime  │ load │ ram │ disk  │ docker │ expires │
 ├───────────┼──────────┼─────────┼──────┼─────┼───────┼────────┼─────────┤
-│ web       │ ● online │ 2sem 5d │ 0.28 │ 32% │ 22%   │ 5/6    │ 53d     │
-│ db        │ ● online │ 4sem 4d │ 0.04 │ 18% │ 62%   │ 6/6    │ 6d  ⚠   │
+│ web       │ ● online │ 2w 5d   │ 0.28 │ 32% │ 22%   │ 5/6    │ 53d     │
+│ db        │ ● online │ 4w 4d   │ 0.04 │ 18% │ 62%   │ 6/6    │ 6d  ⚠   │
 └───────────┴──────────┴─────────┴──────┴─────┴───────┴────────┴─────────┘
 ```
 
-## Por que existe
+## Why it exists
 
-Quem mantém alguns servidores acaba acumulando comandos soltos e logins repetidos
-para responder perguntas simples. Vordr junta isso numa camada única que:
+Anyone running a few servers ends up collecting loose commands and repeated logins to
+answer simple questions. Vordr folds that into a single layer that:
 
-1. olha **todos os hosts de uma vez**, com métricas comparáveis e coloridas por
-   limiar (load por CPU, % de disco/RAM);
-2. avisa **antes** de uma renovação cobrar de novo;
-3. dá uma **auditoria rápida de segurança** sem precisar logar em cada máquina.
+1. looks at **all hosts at once**, with comparable metrics colored by threshold
+   (load per CPU, disk/RAM %);
+2. warns **before** a renewal charges again;
+3. gives a **quick security audit** without logging into each machine.
 
-Vordr coleta métricas via pequenos scripts `sh` que emitem `CHAVE=valor` (estável e
-testável) em vez de parsear saída colorida e frágil — mas ainda oferece um modo
-`--raw` que reproduz a saída nativa de um `status_command` seu, quando você define um.
+Vordr collects metrics via small `sh` scripts that emit `KEY=value` (stable and
+testable) instead of parsing fragile colored output — but it still offers a `--raw`
+mode that reproduces the native output of a `status_command` of yours, when you set one.
 
-## Instalação
+## Install
 
-Requer Python 3.11+ e o cliente `ssh` configurado com os hosts que você quer monitorar.
+Requires Python 3.11+ and the `ssh` client configured with the hosts you want to watch.
 
 ```bash
-pipx install vordr          # recomendado (ferramenta isolada no PATH)
-# ou, para desenvolvimento:
+pipx install vordr          # recommended (isolated tool on PATH)
+# or, for development:
 pip install -e ".[dev]"
 ```
 
-## Começo rápido (só com um token)
+## Quick start (just a token)
 
-Para custo e cobrança você **não precisa configurar nada**: dê um token de provedor e
-o Vordr **descobre os servidores da sua conta** sozinho.
-
-```bash
-vordr secret set hetzner   # ou: vordr secret set vultr
-vordr cost                 # lista os servidores da conta, com custo e tempo de uso
-vordr billing              # saldo/crédito e próxima cobrança
-```
-
-O `config.toml` é **opcional** e serve só para o que a API não sabe: um apelido bonito,
-o alias SSH (para `status`/`resources`/`security`) ou um **preço travado** que difere do
-de lista (promoção/legado). O que você escrever no config sempre vence o que vem da API.
-
-## Configuração (opcional)
-
-Os hosts são **aliases do seu `~/.ssh/config`** — nenhum IP, usuário ou chave fica
-guardado pelo Vordr. Cada host tem dois blocos de ciclo de vida: `[hosts.X.server]` (a
-hospedagem) e `[hosts.X.domain]` (o domínio) — ambos com campos **todos opcionais**,
-preenchidos pela API/RDAP quando você os deixa em branco.
+For cost and billing you **don't need to configure anything**: give a provider token
+and Vordr **discovers your account's servers** on its own.
 
 ```bash
-vordr init        # assistente: importa os servidores da API e mapeia aliases SSH
+vordr secret set hetzner   # or: vordr secret set vultr
+vordr cost                 # lists the account's servers, with cost and age
+vordr billing              # balance/credit and next charge
 ```
 
-Num terminal, `vordr init` é um **assistente**: com um token salvo, ele lista os
-servidores da conta, sugere o alias SSH de cada um (lendo seu `~/.ssh/config`) e
-pergunta se há um preço fixo a travar — gerando o config sem você escrever TOML. Em
-pipe/CI, ou sem token, escreve um modelo comentado.
+The `config.toml` is **optional** and only covers what the API can't know: a nice label,
+the SSH alias (for `status`/`resources`/`security`) or a **pinned price** that differs
+from the list price (promo/legacy). What you write in the config always wins over the API.
 
-Se um servidor não tiver alias SSH (você deixa em branco, ou escreve `ssh = ""`), ele
-entra como **billing-only**: aparece em `cost`/`billing`, mas `status`/`resources`/
-`security` o ignoram (com um aviso), pois não há como contatá-lo.
+## Configuration (optional)
+
+Hosts are **aliases from your `~/.ssh/config`** — no IP, user or key is stored by Vordr.
+Each host has two lifecycle blocks: `[hosts.X.server]` (the hosting) and
+`[hosts.X.domain]` (the domain) — both with **all-optional** fields, filled from the
+API/RDAP when you leave them blank.
+
+```bash
+vordr init        # wizard: imports servers from the API and maps SSH aliases
+```
+
+In a terminal, `vordr init` is a **wizard**: with a saved token, it lists the account's
+servers, suggests the SSH alias for each (reading your `~/.ssh/config`) and asks whether
+there's a fixed price to pin — generating the config without you writing TOML. In a
+pipe/CI, or without a token, it writes a commented template.
+
+If a server has no SSH alias (you leave it blank, or write `ssh = ""`), it becomes
+**billing-only**: it shows in `cost`/`billing`, but `status`/`resources`/`security`
+ignore it (with a warning), since there's no way to contact it.
 
 ```toml
 [thresholds]
@@ -93,20 +92,20 @@ warn_days = 14
 critical_days = 7
 
 [hosts.web]
-ssh = "web"                   # alias no ~/.ssh/config
+ssh = "web"                   # alias in ~/.ssh/config
 label = "Web"
-# status_command = "meu-status"   # opcional: seu script para `vordr status --raw`
+# status_command = "my-status"   # optional: your script for `vordr status --raw`
 
-  [hosts.web.server]          # a hospedagem
+  [hosts.web.server]          # the hosting
   provider = "Hetzner"
-  since   = "2024-03-01"      # desde quando você hospeda (tempo de hospedagem)
-  expires = "2026-08-15"      # AAAA-MM-DD — próxima renovação do servidor
+  since   = "2024-03-01"      # since when you've hosted (hosting age)
+  expires = "2026-08-15"      # YYYY-MM-DD — next server renewal
   cost = 6.99
   currency = "USD"
   cycle = "monthly"           # monthly | yearly
 
-  [hosts.web.domain]          # o domínio (opcional)
-  name = "web.exemplo.com"
+  [hosts.web.domain]          # the domain (optional)
+  name = "web.example.com"
   registrar = "Cloudflare"
   expires = "2027-03-01"
   cost = 12.00
@@ -114,93 +113,94 @@ label = "Web"
   cycle = "yearly"
 ```
 
-Vordr não embute nenhum host. Sem config **e** sem token, os comandos apenas orientam o
-próximo passo (`vordr secret set` ou `vordr init`). Os comandos que dependem de SSH
-(`status`, `resources`, `security`) precisam dos aliases no config; já `cost` e
-`billing` funcionam só com o token.
+Vordr ships no hosts. Without a config **and** without a token, the commands just point
+you to the next step (`vordr secret set` or `vordr init`). The SSH-based commands
+(`status`, `resources`, `security`) need the aliases in the config; `cost` and `billing`
+work with just the token.
 
-## Uso
+## Usage
 
 ```bash
-vordr status              # painel de todos os hosts
-vordr status web          # só um host
-vordr status --watch 5    # atualiza a cada 5s (tela cheia)
-vordr status --raw        # saída nativa do status_command do host
+vordr status              # board of all hosts
+vordr status web          # a single host
+vordr status --watch 5    # refresh every 5s (full screen)
+vordr status --raw        # host's native status_command output
 
-vordr resources           # CPU/load, memória e disco em detalhe
-vordr security            # auditoria: logins, falhas, portas, fail2ban, updates
-vordr cost                # tabela: hospedagem, renovação de servidor/domínio, custo/mês
-vordr cost web            # painel detalhado do ciclo de vida de um host
-vordr cost --offline      # sem rede: usa só o que está no config
-vordr billing             # saldo/crédito e próxima cobrança por provedor
-vordr hosts               # lista o que está configurado
+vordr resources           # CPU/load, memory and disk in detail
+vordr security            # audit: logins, failures, ports, fail2ban, updates
+vordr cost                # table: hosting, server/domain renewal, cost/mo
+vordr cost web            # detailed lifecycle panel for one host
+vordr cost --offline      # no network: uses only the config
+vordr billing             # balance/credit and next charge per provider
+vordr hosts               # lists what's configured
 
-vordr secret set hetzner  # guarda o token da API (chmod 600, fora do repo)
-vordr secret status       # mostra quais provedores têm token (mascarado)
+vordr secret set hetzner  # stores the API token (chmod 600, outside the repo)
+vordr secret status       # shows which providers have a token (masked)
 ```
 
-Todas as cores seguem limiares: verde (ok), amarelo (atenção), vermelho (crítico) —
-para disco/RAM, load por CPU e dias até a cobrança.
+All colors follow thresholds: green (ok), yellow (attention), red (critical) — for
+disk/RAM, load per CPU and days until the charge.
 
-## Automação do `cost` (sem digitar datas)
+## `cost` automation (no typing dates)
 
-O `cost` preenche sozinho o que você não informou — **e o valor do config sempre
-vence** (útil para preços promocionais/legados):
+`cost` fills in what you didn't provide — **and the config value always wins** (handy
+for promo/legacy prices):
 
-- **Domínio:** informe só `name` no `[hosts.X.domain]` e a expiração vem do **RDAP**
-  (público, sem credencial), cacheada em `~/.cache/vordr/rdap.json`.
-- **Servidor:** com `provider = "Hetzner"` ou `"Vultr"` e um token configurado, o
-  `since` (data de criação) e o **custo mensal** vêm da **API do provedor**.
+- **Domain:** give just `name` in `[hosts.X.domain]` and the expiry comes from **RDAP**
+  (public, no credential), cached in `~/.cache/vordr/rdap.json`.
+- **Server:** with `provider = "Hetzner"` or `"Vultr"` and a token configured, the
+  `since` (creation date) and the **monthly cost** come from the **provider's API**.
 
-Provedores suportados: **Hetzner** (`HCLOUD_TOKEN`) e **Vultr** (`VULTR_API_KEY`).
-Tokens nunca ficam no repositório: são lidos de variável de ambiente ou de
-`~/.config/vordr/secrets.toml` (chmod 600, no `.gitignore`), com o env tendo
-prioridade. Configure com `vordr secret set <provedor>`. Valores vindos da rede
-aparecem marcados com `(API)` / `(RDAP)`.
+Supported providers: **Hetzner** (`HCLOUD_TOKEN`) and **Vultr** (`VULTR_API_KEY`).
+Tokens never live in the repository: they're read from an environment variable or from
+`~/.config/vordr/secrets.toml` (chmod 600, in `.gitignore`), with env taking precedence.
+Configure with `vordr secret set <provider>`. Values coming from the network are tagged
+with `(API)` / `(RDAP)`.
 
-> ⚠️ O preço da API é o **de lista** do tipo/plano — se a sua conta tem valor
-> promocional/travado, informe `cost` no config (ele vence). A API da **Vultr** usa
-> allowlist de IP e o token é *full-access* (não há read-only): cuide bem dele.
+> ⚠️ The API price is the **list price** of the type/plan — if your account has a
+> promo/locked value, set `cost` in the config (it wins). The **Vultr** API uses an IP
+> allowlist and the token is *full-access* (there's no read-only): guard it well.
 
-### Saldo e próxima cobrança (`vordr billing`)
+### Balance and next charge (`vordr billing`)
 
-Com o token configurado, `vordr billing` responde *quando* e *de onde* sai a cobrança
-— cada provedor tem um modelo:
+With a token configured, `vordr billing` answers *when* and *from where* the charge
+comes — each provider has a model:
 
-- **Pré-pago (ex.: Vultr):** mostra **crédito**, **uso pendente** do ciclo e o
-  **runway** — quantos dias o saldo ainda cobre (somando o custo dos servidores da
-  conta) e a data em que ele esgota. Útil quando se roda em cima de bônus/crédito: a
-  cobrança no cartão só começa quando o saldo zera. Um resumo dessa linha aparece
-  também no rodapé do `vordr cost`.
-- **Postpago (ex.: Hetzner):** a Cloud API **não expõe saldo**; o `billing` mostra a
-  **próxima data de cobrança** (1º do mês seguinte) e o custo mensal estimado.
+- **Prepaid (e.g. Vultr):** shows **credit**, the cycle's **pending usage** and the
+  **runway** — how many days the balance still covers (summing the account's server
+  costs) and the date it runs out. Useful when running on a bonus/credit: the card is
+  only charged once the balance hits zero. A summary of that line also appears in the
+  footer of `vordr cost`.
+- **Postpaid (e.g. Hetzner):** the Cloud API **doesn't expose a balance**; `billing`
+  shows the **next charge date** (1st of the next month) and the estimated monthly cost.
 
-## Como funciona
+## How it works
 
-| Camada            | Arquivo            | Responsabilidade                                   |
-|-------------------|--------------------|----------------------------------------------------|
-| Transporte SSH    | `vordr/ssh.py`     | Executa comandos remotos (`BatchMode`, timeout).   |
-| Coleta de métrica | `vordr/probe.py`   | Scripts `sh` → `CHAVE=valor` → dataclasses.        |
-| Configuração      | `vordr/config.py`  | Lê o TOML; cálculo de dias/custo.                  |
-| Expiração domínio | `vordr/rdap.py`    | RDAP público + cache em disco (sem credencial).    |
-| API de provedor   | `vordr/hetzner.py`, `vordr/vultr.py` | Clientes read-only (since, preço e saldo). |
-| Segredos          | `vordr/secrets.py` | Tokens fora do repo (env > arquivo chmod 600).     |
-| Formatação        | `vordr/format.py`  | Funções puras (uptime, bytes, limiares de cor).    |
-| CLI               | `vordr/cli.py`     | Typer + Rich; orquestra tudo em paralelo.          |
+| Layer            | File                   | Responsibility                                  |
+|------------------|------------------------|-------------------------------------------------|
+| SSH transport    | `src/vordr/ssh.py`     | Runs remote commands (`BatchMode`, timeout).    |
+| Metric probe     | `src/vordr/probe.py`   | `sh` scripts → `KEY=value` → dataclasses.       |
+| Configuration    | `src/vordr/config.py`  | Reads the TOML; days/cost computation.          |
+| Domain expiry    | `src/vordr/rdap.py`    | Public RDAP + on-disk cache (no credential).    |
+| Provider API     | `src/vordr/hetzner.py`, `src/vordr/vultr.py` | Read-only clients (since, price, balance). |
+| Secrets          | `src/vordr/secrets.py` | Tokens outside the repo (env > chmod-600 file). |
+| Formatting       | `src/vordr/format.py`  | Pure functions (uptime, bytes, color thresholds).|
+| CLI              | `src/vordr/cli.py`     | Typer + Rich; orchestrates everything in parallel.|
 
-Os hosts são consultados **em paralelo** (`ThreadPoolExecutor`), então monitorar 2 ou
-10 servidores leva praticamente o mesmo tempo.
+Hosts are queried **in parallel** (`ThreadPoolExecutor`), so watching 2 or 10 servers
+takes essentially the same time.
 
-### Segurança por design
+### Secure by design
 
-- **Read-only:** Vordr só roda comandos de leitura (`/proc`, `df`, `ss`, `last`, …).
-- **Sem segredos no repositório:** hosts são aliases SSH; o `config.toml` real fica
-  fora do versionamento (veja `.gitignore`).
-- **Sem `sudo` interativo:** checagens privilegiadas usam `sudo -n` (não-interativo) e
-  degradam graciosamente quando não há permissão — nunca travam o terminal.
-- **`BatchMode`:** se a chave não estiver disponível, falha rápido em vez de pedir senha.
+- **Read-only:** Vordr only runs read commands (`/proc`, `df`, `ss`, `last`, …).
+- **No secrets in the repository:** hosts are SSH aliases; the real `config.toml` stays
+  out of version control (see `.gitignore`).
+- **No interactive `sudo`:** privileged checks use `sudo -n` (non-interactive) and
+  degrade gracefully when there's no permission — they never block the terminal.
+- **`BatchMode`:** if the key isn't available, it fails fast instead of prompting for a
+  password.
 
-## Desenvolvimento
+## Development
 
 ```bash
 pip install -e ".[dev]"
@@ -208,9 +208,9 @@ ruff check .
 pytest
 ```
 
-Os testes não tocam a rede: a camada SSH é injetada (`monkeypatch`) e a lógica de
-parsing/formatação é testada com amostras reais de saída dos servidores.
+The tests never touch the network: the SSH layer is injected (`monkeypatch`) and the
+parsing/formatting logic is tested against real samples of server output.
 
-## Licença
+## License
 
-MIT — veja [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).

@@ -48,7 +48,7 @@ def test_parse_full_config():
     assert host.server.since == date(2024, 3, 1)
     assert host.server.expires == date(2026, 8, 15)
     assert host.server.monthly_cost == 6.99
-    # domínio: registrar vira provider; custo anual normalizado para o mês
+    # domain: registrar becomes provider; yearly cost normalized to the month
     assert host.domain is not None
     assert host.domain.name == "alpha.example.com"
     assert host.domain.provider == "Cloudflare"

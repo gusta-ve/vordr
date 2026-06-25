@@ -1,9 +1,9 @@
-# Configuração real do usuário — NUNCA versionar (pode conter datas/custos privados)
+# Real user config — NEVER commit (may contain private dates/costs)
 config.toml
 /config.toml
 .config/
 
-# Segredos (tokens de API) — NUNCA versionar
+# Secrets (API tokens) — NEVER commit
 secrets.toml
 /secrets.toml
 
@@ -18,14 +18,14 @@ dist/
 venv/
 env/
 
-# Ferramentas
+# Tooling
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
 .coverage
 htmlcov/
 
-# Editores / SO
+# Editors / OS
 .vscode/
 .idea/
 *.swp

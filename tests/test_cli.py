@@ -41,18 +41,18 @@ label = "DB"
 
 
 def _isolate_secrets(monkeypatch, tmp_path):
-    """Garante que os testes não leiam tokens reais do ambiente nem do home."""
+    """Ensure tests don't read real tokens from the environment or home."""
     monkeypatch.setenv("VORDR_SECRETS", str(tmp_path / "secrets.toml"))
     monkeypatch.delenv("HCLOUD_TOKEN", raising=False)
     monkeypatch.delenv("VULTR_API_KEY", raising=False)
 
 
 def _write_config(monkeypatch, tmp_path):
-    """Escreve um config genérico e aponta o Vordr para ele (sem tocar no do usuário)."""
+    """Write a generic config and point Vordr at it (without touching the user's)."""
     path = tmp_path / "config.toml"
     path.write_text(_SAMPLE_CONFIG, encoding="utf-8")
     monkeypatch.setenv("VORDR_CONFIG", str(path))
-    # evita o rich truncar colunas na largura padrão (80) fora de um terminal
+    # keep rich from truncating columns at the default width (80) outside a terminal
     monkeypatch.setenv("COLUMNS", "200")
     _isolate_secrets(monkeypatch, tmp_path)
     return path
@@ -76,7 +76,7 @@ def test_no_config_shows_init_hint(monkeypatch, tmp_path):
     monkeypatch.setenv("VORDR_CONFIG", str(tmp_path / "absent.toml"))
     result = runner.invoke(cli.app, ["status"])
     assert result.exit_code == 0
-    assert "nenhum host" in result.stdout.lower()
+    assert "no hosts" in result.stdout.lower()
 
 
 def test_cost_table_lists_providers_and_total(monkeypatch, tmp_path):
@@ -84,9 +84,9 @@ def test_cost_table_lists_providers_and_total(monkeypatch, tmp_path):
     result = runner.invoke(cli.app, ["cost"])
     assert result.exit_code == 0
     out = result.stdout.lower()
-    assert "custo" in out
+    assert "cost" in out
     assert "hetzner" in out
-    assert "total mensal" in out
+    assert "monthly total" in out
 
 
 def test_cost_panel_for_single_host(monkeypatch, tmp_path):
@@ -94,8 +94,8 @@ def test_cost_panel_for_single_host(monkeypatch, tmp_path):
     result = runner.invoke(cli.app, ["cost", "web"])
     assert result.exit_code == 0
     out = result.stdout.lower()
-    assert "hospedando há" in out
-    assert "domínio" in out
+    assert "hosting for" in out
+    assert "domain" in out
     assert "cloudflare" in out
 
 
@@ -133,7 +133,7 @@ def test_cost_offline_skips_rdap(monkeypatch, tmp_path):
     monkeypatch.setenv("COLUMNS", "200")
 
     def boom(name, timeout=10):
-        raise AssertionError("não deveria consultar RDAP no modo offline")
+        raise AssertionError("should not query RDAP in offline mode")
 
     monkeypatch.setattr(cli.rdap, "domain_expiry", boom)
     result = runner.invoke(cli.app, ["cost", "--offline"])
@@ -173,9 +173,9 @@ def test_cost_autofills_from_provider_api(monkeypatch, tmp_path):
     result = runner.invoke(cli.app, ["cost", "box"])
     assert result.exit_code == 0
     out = result.stdout
-    assert "2025-01-01" in out      # since veio da API
-    assert "6.49" in out            # custo veio da API
-    assert "(API)" in out           # marcado como automático
+    assert "2025-01-01" in out      # since came from the API
+    assert "6.49" in out            # cost came from the API
+    assert "(API)" in out           # marked as automatic
 
 
 def test_manual_cost_overrides_provider_api(monkeypatch, tmp_path):
@@ -187,7 +187,7 @@ def test_manual_cost_overrides_provider_api(monkeypatch, tmp_path):
 
     result = runner.invoke(cli.app, ["cost"])
     assert result.exit_code == 0
-    # o valor manual (4.99) vence o da API (6.49)
+    # the manual value (4.99) wins over the API's (6.49)
     assert "4.99" in result.stdout
     assert "EUR 4.99" in result.stdout
 
@@ -207,7 +207,7 @@ def test_cost_autofills_from_vultr(monkeypatch, tmp_path):
     monkeypatch.setenv("COLUMNS", "200")
     _isolate_secrets(monkeypatch, tmp_path)
     monkeypatch.setattr(cli.secrets, "get_token", lambda p: "tok" if p == "vultr" else None)
-    # label "SimpliMEI-Core-Production" casa com o alias "simplimei" por substring
+    # label "SimpliMEI-Core-Production" matches the "simplimei" alias by substring
     monkeypatch.setattr(
         cli.vultr,
         "fetch_servers",
@@ -229,7 +229,7 @@ def test_cost_hints_when_provider_token_missing(monkeypatch, tmp_path):
     monkeypatch.setattr(cli.secrets, "get_token", lambda p: None)
 
     def boom(token, timeout=15):
-        raise AssertionError("não deveria chamar a API sem token")
+        raise AssertionError("should not call the API without a token")
 
     monkeypatch.setattr(cli.hetzner, "fetch_servers", boom)
     result = runner.invoke(cli.app, ["cost", "box"])
@@ -238,7 +238,7 @@ def test_cost_hints_when_provider_token_missing(monkeypatch, tmp_path):
 
 
 def test_init_wizard_no_alias_makes_billing_only(monkeypatch, tmp_path):
-    """Sem alias casado e enter vazio → host 'billing-only' (ssh vazio)."""
+    """No matching alias and empty enter → 'billing-only' host (empty ssh)."""
     from datetime import date
 
     from vordr.providers import ServerBilling
@@ -256,13 +256,13 @@ def test_init_wizard_no_alias_makes_billing_only(monkeypatch, tmp_path):
         },
     )
     monkeypatch.setattr(cli.ssh, "list_aliases", lambda: [])  # nenhum alias no ssh config
-    # importar(enter) / alias vazio(enter) / preço vazio(enter)
+    # import(enter) / empty alias(enter) / empty price(enter)
     result = runner.invoke(cli.app, ["init"], input="\n\n\n")
     assert result.exit_code == 0
     text = path.read_text()
     assert 'ssh = ""' in text                    # billing-only
     assert 'provider = "Hetzner"' in text
-    # a chave da tabela vem do nome do servidor
+    # the table key comes from the server name
     assert "[hosts.ubuntu-nexus]" in text
 
 
@@ -278,11 +278,11 @@ def test_status_skips_billing_only_host(monkeypatch, tmp_path):
     _isolate_secrets(monkeypatch, tmp_path)
     result = runner.invoke(cli.app, ["status"])
     assert result.exit_code == 0
-    assert "sem alias ssh" in result.stdout.lower()
+    assert "no ssh alias" in result.stdout.lower()
 
 
 def test_cost_discovers_servers_without_config(monkeypatch, tmp_path):
-    """Com token e nenhum host no config, o `cost` lista os servidores da API."""
+    """With a token and no hosts in config, `cost` lists the servers from the API."""
     from datetime import date
 
     from vordr.providers import ServerBilling
@@ -302,7 +302,7 @@ def test_cost_discovers_servers_without_config(monkeypatch, tmp_path):
     )
     result = runner.invoke(cli.app, ["cost"])
     assert result.exit_code == 0
-    assert "ubuntu-nexus" in result.stdout      # descoberto pela API
+    assert "ubuntu-nexus" in result.stdout      # discovered via the API
     assert "6.49" in result.stdout
 
 
@@ -349,8 +349,8 @@ def test_billing_prepaid_shows_credit_and_runway(monkeypatch, tmp_path):
     assert result.exit_code == 0
     out = result.stdout
     assert "Vultr" in out
-    assert "193.88" in out          # crédito
-    assert "114.86" in out          # líquido
+    assert "193.88" in out          # credit
+    assert "114.86" in out          # net
     assert "runway" in out.lower()
 
 
@@ -361,7 +361,7 @@ def test_billing_postpaid_shows_next_charge(monkeypatch, tmp_path):
     assert result.exit_code == 0
     out = result.stdout.lower()
     assert "hetzner" in out
-    assert "postpago" in out
+    assert "postpaid" in out
 
 
 def test_cost_shows_balance_summary_line(monkeypatch, tmp_path):
@@ -393,7 +393,7 @@ def test_cost_shows_balance_summary_line(monkeypatch, tmp_path):
     )
     result = runner.invoke(cli.app, ["cost"])
     assert result.exit_code == 0
-    assert "crédito" in result.stdout
+    assert "credit" in result.stdout
     assert "193.88" in result.stdout
 
 
@@ -404,7 +404,7 @@ def test_secret_status(monkeypatch, tmp_path):
     result = runner.invoke(cli.app, ["secret", "status"])
     assert result.exit_code == 0
     assert "hetzner" in result.stdout
-    assert "abcd…5678" in result.stdout     # mascarado
+    assert "abcd…5678" in result.stdout     # masked
     assert "abcd1234efgh5678" not in result.stdout
 
 
@@ -415,7 +415,7 @@ def test_secret_set_validates_and_writes(monkeypatch, tmp_path):
     assert result.exit_code == 0
     saved = (tmp_path / "secrets.toml").read_text()
     assert "my-secret-token" in saved
-    # arquivo gravado com permissão 600
+    # file written with 600 permission
     import stat
 
     mode = (tmp_path / "secrets.toml").stat().st_mode
@@ -432,12 +432,12 @@ def test_init_creates_config(monkeypatch, tmp_path):
     path = tmp_path / "config.toml"
     monkeypatch.setenv("VORDR_CONFIG", str(path))
     _isolate_secrets(monkeypatch, tmp_path)
-    # não-interativo (CliRunner) → escreve o template comentado
+    # non-interactive (CliRunner) → writes the commented template
     result = runner.invoke(cli.app, ["init"])
     assert result.exit_code == 0
     assert path.exists()
     assert "hosts.web" in path.read_text()
-    # segunda vez sem --force deve falhar
+    # second run without --force must fail
     again = runner.invoke(cli.app, ["init"])
     assert again.exit_code == 1
 
@@ -460,12 +460,12 @@ def test_init_wizard_imports_from_api(monkeypatch, tmp_path):
         },
     )
     monkeypatch.setattr(cli.ssh, "list_aliases", lambda: ["nexus", "db"])
-    # confirma importar (enter=sim) / alias default (enter) / preço fixo vazio (enter)
+    # confirm import (enter=yes) / default alias (enter) / empty fixed price (enter)
     result = runner.invoke(cli.app, ["init"], input="\n\n\n")
     assert result.exit_code == 0
     text = path.read_text()
     assert 'provider = "Hetzner"' in text
-    assert 'ssh = "nexus"' in text          # alias sugerido a partir de ubuntu-nexus
+    assert 'ssh = "nexus"' in text          # alias suggested from ubuntu-nexus
     assert "[hosts.nexus]" in text
 
 
@@ -487,7 +487,7 @@ def test_init_wizard_pins_promo_price(monkeypatch, tmp_path):
         },
     )
     monkeypatch.setattr(cli.ssh, "list_aliases", lambda: [])
-    # importar / alias "nexus" / preço fixo "4.99"
+    # import / alias "nexus" / fixed price "4.99"
     result = runner.invoke(cli.app, ["init"], input="\nnexus\n4.99\n")
     assert result.exit_code == 0
     text = path.read_text()

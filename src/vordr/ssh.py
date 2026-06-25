@@ -1,8 +1,8 @@
-"""Camada de transporte: executa comandos nos hosts via SSH.
+"""Transport layer: run commands on hosts over SSH.
 
-Vordr nunca guarda IPs nem credenciais. Ele apoia-se inteiramente no seu
-`~/.ssh/config` — os hosts são referenciados por *alias* (ex.: ``web``,
-``db``). Toda a autenticação é delegada ao SSH (chave, agent, etc.).
+Vordr never stores IPs or credentials. It relies entirely on your `~/.ssh/config` —
+hosts are referenced by *alias* (e.g. ``web``, ``db``). All authentication is
+delegated to SSH (key, agent, etc.).
 """
 
 from __future__ import annotations
@@ -15,14 +15,14 @@ from pathlib import Path
 
 DEFAULT_TIMEOUT = 20
 
-# Forçamos um locale neutro para que a saída dos comandos remotos seja estável
-# e não venha poluída por avisos de "cannot change locale".
+# We force a neutral locale so the remote command output is stable and not polluted
+# by "cannot change locale" warnings.
 _REMOTE_PREFIX = "LC_ALL=C LANG=C "
 
 
 @dataclass
 class SSHResult:
-    """Resultado de um comando remoto."""
+    """Result of a remote command."""
 
     returncode: int
     stdout: str
@@ -34,11 +34,11 @@ class SSHResult:
 
 
 class SSHError(RuntimeError):
-    """Falha ao contatar o host (timeout, host inacessível, ssh ausente)."""
+    """Failure contacting the host (timeout, unreachable host, ssh missing)."""
 
 
 def ssh_available() -> bool:
-    """Indica se o binário ``ssh`` está disponível no PATH."""
+    """Whether the ``ssh`` binary is available on PATH."""
     return shutil.which("ssh") is not None
 
 
@@ -47,9 +47,9 @@ def config_path() -> Path:
 
 
 def list_aliases(path: Path | None = None) -> list[str]:
-    """Lê os aliases ``Host`` do ``~/.ssh/config`` (ignora padrões com curinga).
+    """Read the ``Host`` aliases from ``~/.ssh/config`` (skips wildcard patterns).
 
-    Usado pelo ``vordr init`` para sugerir o alias de cada servidor descoberto.
+    Used by ``vordr init`` to suggest the alias for each discovered server.
     """
     path = path or config_path()
     if not path.exists():
@@ -78,14 +78,14 @@ def run(
     timeout: int = DEFAULT_TIMEOUT,
     batch: bool = True,
 ) -> SSHResult:
-    """Executa ``command`` no host ``alias`` e devolve o resultado.
+    """Run ``command`` on host ``alias`` and return the result.
 
-    ``batch=True`` usa ``BatchMode=yes`` para nunca abrir prompt interativo
-    (senha/passphrase) — se a chave não estiver disponível, falha rápido em vez
-    de travar o terminal.
+    ``batch=True`` uses ``BatchMode=yes`` to never open an interactive prompt
+    (password/passphrase) — if the key isn't available it fails fast instead of
+    blocking the terminal.
     """
     if not ssh_available():
-        raise SSHError("binário 'ssh' não encontrado no PATH")
+        raise SSHError("'ssh' binary not found on PATH")
 
     argv = ["ssh"]
     if batch:
@@ -106,20 +106,20 @@ def run(
             text=True,
             timeout=timeout,
         )
-    except subprocess.TimeoutExpired as exc:  # pragma: no cover - depende de rede
-        raise SSHError(f"timeout ({timeout}s) ao contatar '{alias}'") from exc
+    except subprocess.TimeoutExpired as exc:  # pragma: no cover - network dependent
+        raise SSHError(f"timeout ({timeout}s) contacting '{alias}'") from exc
 
     return SSHResult(proc.returncode, proc.stdout, proc.stderr)
 
 
 def run_passthrough(alias: str, command: str, *, timeout: int = DEFAULT_TIMEOUT) -> int:
-    """Executa ``command`` herdando o terminal (mantém cores/ANSI nativos).
+    """Run ``command`` inheriting the terminal (keeps native colors/ANSI).
 
-    Usado pelo modo ``--raw``, que apenas reproduz a saída original do
-    ``status_command`` configurado do host, tal como ela é no servidor.
+    Used by ``--raw`` mode, which just reproduces the original output of the host's
+    configured ``status_command``, exactly as it is on the server.
     """
     if not ssh_available():
-        raise SSHError("binário 'ssh' não encontrado no PATH")
+        raise SSHError("'ssh' binary not found on PATH")
 
     argv = [
         "ssh",
@@ -131,5 +131,5 @@ def run_passthrough(alias: str, command: str, *, timeout: int = DEFAULT_TIMEOUT)
     ]
     try:
         return subprocess.call(argv, timeout=timeout)
-    except subprocess.TimeoutExpired as exc:  # pragma: no cover - depende de rede
-        raise SSHError(f"timeout ({timeout}s) ao contatar '{alias}'") from exc
+    except subprocess.TimeoutExpired as exc:  # pragma: no cover - network dependent
+        raise SSHError(f"timeout ({timeout}s) contacting '{alias}'") from exc

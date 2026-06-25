@@ -1,0 +1,57 @@
+# Changelog
+
+All notable changes to this project are documented here. The format is loosely
+based on [Keep a Changelog](https://keepachangelog.com/).
+
+## [0.6.0]
+
+### Changed
+- **The whole tool is now in English** — CLI help, messages, output and docs — to match
+  the sibling projects (wraith, hickok, deadwood).
+- **Repository moved to a `src/` layout** (`src/vordr/`), with the pyproject, ruff and
+  pytest config updated to match.
+
+### Added
+- **Branded splash on the bare command.** Running `vordr` with no arguments now prints a
+  short banner (tagline + quickstart + `vordr -h` hint) instead of the raw Typer help.
+- `-h` is now accepted as an alias for `--help`.
+- Project meta files: `Makefile`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`.
+
+## [0.5.1]
+
+### Changed
+- Slimmed down the static config template and `config.example.toml` to the bare minimum,
+  making clear the file is optional (the API discovers servers).
+
+## [0.5.0]
+
+### Added
+- **Billing-only hosts.** A host with no SSH alias (`ssh = ""`) shows in `cost`/`billing`
+  but is skipped (with a notice) by `status`/`resources`/`security`. The `init` wizard
+  leaves the alias blank when it can't match one, instead of guessing the server name.
+
+## [0.4.0]
+
+### Added
+- **Interactive `vordr init`.** In a terminal it becomes a wizard: it discovers servers
+  from the API, suggests the SSH alias from `~/.ssh/config`, and asks for a pinned price.
+
+## [0.3.0]
+
+### Added
+- **Automatic server discovery.** `cost` and `billing` list the account's servers from
+  any provider with a saved token — the config is now optional.
+
+## [0.2.0]
+
+### Added
+- **`vordr billing`** — balance, credit and next charge per provider. Prepaid providers
+  (Vultr) show credit, pending usage and runway; postpaid ones (Hetzner) show the next
+  charge date and estimated cost.
+
+## [0.1.0]
+
+### Added
+- Initial release: `status`, `resources`, `security`, `cost`, `hosts`, `init` over SSH;
+  automatic domain expiry via RDAP; provider cost/since via the Hetzner and Vultr APIs;
+  tokens stored outside the repo (`vordr secret set`).
