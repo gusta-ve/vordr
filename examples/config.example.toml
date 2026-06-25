@@ -11,6 +11,16 @@
 warn_days = 14       # yellow when this many days or fewer remain
 critical_days = 7    # red when this many days or fewer remain
 
+# `vordr check` alert thresholds (optional — defaults shown).
+[alerts]
+runway_days = 14     # warn when a prepaid bonus/credit runs out within N days
+charge_days = 7      # warn when a charge/renewal/expiry is within N days
+
+# Push channel for `vordr check --notify` (optional). ntfy.sh needs no account —
+# just pick a hard-to-guess topic. Overridable with the VORDR_NTFY_URL env var.
+[notify]
+ntfy = "https://ntfy.sh/vordr-change-this-topic"
+
 # A fully-specified host (every field set by hand).
 [hosts.web]
 ssh = "web"                   # alias in ~/.ssh/config (use "" for a billing-only host)

@@ -86,6 +86,10 @@ class Config:
     hosts: dict[str, Host]
     warn_days: int = 14
     critical_days: int = 7
+    # `vordr check` alert thresholds
+    runway_days: int = 14     # warn when prepaid credit runs out within N days
+    charge_days: int = 7      # warn when a charge/renewal/expiry is within N days
+    ntfy: str | None = None   # ntfy URL/topic for `vordr check --notify`
     source: Path | None = None
 
     def host(self, name: str) -> Host:
@@ -167,10 +171,15 @@ def parse(data: dict, *, source: Path | None = None) -> Config:
     hosts = {name: _parse_host(name, raw) for name, raw in hosts_raw.items()}
 
     thresholds = data.get("thresholds", {})
+    alerts = data.get("alerts", {})
+    notify = data.get("notify", {})
     return Config(
         hosts=hosts,
         warn_days=int(thresholds.get("warn_days", 14)),
         critical_days=int(thresholds.get("critical_days", 7)),
+        runway_days=int(alerts.get("runway_days", 14)),
+        charge_days=int(alerts.get("charge_days", 7)),
+        ntfy=notify.get("ntfy") or None,
         source=source,
     )
 

@@ -136,6 +136,8 @@ vordr cost                # table: hosting, server/domain renewal, cost/mo
 vordr cost web            # detailed lifecycle panel for one host
 vordr cost --offline      # no network: uses only the config
 vordr billing             # balance/credit and next charge per provider
+vordr check               # triage: only what needs attention (for cron)
+vordr check --notify      # ...and push the alerts to your phone (ntfy)
 vordr hosts               # lists what's configured
 
 vordr secret set hetzner  # stores the API token (chmod 600, outside the repo)
@@ -178,6 +180,37 @@ comes — each provider has a model:
 - **Postpaid (e.g. Hetzner):** the Cloud API **doesn't expose a balance**; `billing`
   shows the **next charge date** (1st of the next month) and the estimated monthly cost.
 
+## Don't get charged by surprise (`vordr check`)
+
+`vordr check` is the triage command — it prints **only what needs attention** and exits
+non-zero if anything does, so it's made for cron. It flags:
+
+- a prepaid **bonus/credit about to run out** (and the card charges that follow),
+- an **upcoming charge or renewal**, and an **expiring domain**,
+- a host that's **offline**.
+
+```bash
+vordr check            # quiet when all is well; lists alerts + exit 1 otherwise
+vordr check --notify   # also push the alerts to your phone (ntfy)
+```
+
+```
+  vordr · check
+
+  ▲ Vultr  ·  credit runs out in ~12d (2026-08-20) → card charges begin
+  ▲ Hetzner  ·  charge in 6d (≈ EUR 4.99, 2026-07-01)
+
+  2 alert(s), 0 critical
+```
+
+Thresholds live in `[alerts]` (`runway_days`, default 14; `charge_days`, default 7).
+With `--notify`, alerts are pushed via **ntfy** — no account, just a topic; set
+`[notify] ntfy = "https://ntfy.sh/<topic>"` (or `VORDR_NTFY_URL`). Run it daily from cron:
+
+```cron
+0 9 * * *  vordr check --notify >/dev/null 2>&1
+```
+
 ## How it works
 
 | Layer            | File                   | Responsibility                                  |
@@ -188,6 +221,7 @@ comes — each provider has a model:
 | Domain expiry    | `src/vordr/rdap.py`    | Public RDAP + on-disk cache (no credential).    |
 | Provider API     | `src/vordr/hetzner.py`, `src/vordr/vultr.py` | Read-only clients (since, price, balance). |
 | Secrets          | `src/vordr/secrets.py` | Tokens outside the repo (env > chmod-600 file). |
+| Alerts / push    | `src/vordr/notify.py`  | `vordr check` push channels (ntfy first).       |
 | Formatting       | `src/vordr/format.py`  | Pure functions (uptime, bytes, color thresholds).|
 | CLI              | `src/vordr/cli.py`     | Typer + Rich; orchestrates everything in parallel.|
 

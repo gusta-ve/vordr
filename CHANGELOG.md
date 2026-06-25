@@ -3,6 +3,16 @@
 All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.8.0]
+
+### Added
+- **`vordr check`** — the triage command. Prints only what needs attention and exits
+  non-zero if anything does (made for cron): a prepaid bonus/credit about to run out
+  (and the card charges that follow), upcoming charges/renewals, expiring domains and
+  offline hosts. Thresholds in `[alerts]` (`runway_days` 14, `charge_days` 7).
+- **`vordr check --notify`** — push the alerts via **ntfy** (`src/vordr/notify.py`);
+  configure with `[notify] ntfy = "..."` or `VORDR_NTFY_URL`.
+
 ## [0.7.0]
 
 ### Changed

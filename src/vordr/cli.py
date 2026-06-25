@@ -14,7 +14,7 @@ from rich.live import Live
 from rich.table import Table
 from rich.text import Text
 
-from . import __version__, hetzner, providers, rdap, secrets, ssh, vultr
+from . import __version__, hetzner, notify, providers, rdap, secrets, ssh, vultr
 from .config import Config, ConfigError, Host, Subscription, config_path, load
 from .format import (
     days_left_label,
@@ -26,7 +26,7 @@ from .format import (
     pct_style,
 )
 from .probe import SecurityMetrics, SystemMetrics, probe_security, probe_system
-from .ui import ACCENT, MUTED, brand, card, console, err_console, grid, indent, kv, meta
+from .ui import ACCENT, MUTED, OK, brand, card, console, err_console, grid, indent, kv, meta
 
 app = typer.Typer(
     name="vordr",
@@ -135,6 +135,7 @@ def _print_host_card(
 # --- splash ----------------------------------------------------------------
 
 _QUICKSTART = [
+    ("vordr check", "only what needs attention — for cron"),
     ("vordr cost", "servers, cost & balance at a glance"),
     ("vordr billing", "credit, runway & next charge"),
     ("vordr status", "are they up? load, ram, disk, docker"),
@@ -1172,6 +1173,143 @@ def billing(
 
     for note in notes:
         console.print(indent(meta(note)))
+
+
+# --- check: triage alerts (offline, runway, charges, expiry) -----------------
+
+@dataclass
+class _Alert:
+    crit: bool
+    who: str       # host display or provider name
+    text: str
+
+
+def _evaluate_alerts(
+    rows: list[tuple[Host, _Lifecycle]],
+    accounts: dict[str, providers.AccountBilling],
+    reach: dict[str, bool],
+    config: Config,
+    today: date,
+) -> list[_Alert]:
+    """The pure triage: which signals cross their threshold right now."""
+    alerts: list[_Alert] = []
+    cd, rd = config.charge_days, config.runway_days
+
+    for host, lc in rows:
+        name = host.display
+        if reach.get(host.name) is False:
+            alerts.append(_Alert(True, name, "offline (unreachable)"))
+        srv = host.server
+        if srv.expires is not None:
+            d = (srv.expires - today).days
+            if d <= cd:
+                what = "renewal overdue" if d < 0 else f"renews in {d}d"
+                alerts.append(_Alert(d < 0, name, f"server {what} ({srv.expires.isoformat()})"))
+        if lc.domain_expiry is not None:
+            d = (lc.domain_expiry - today).days
+            if d <= cd:
+                what = "EXPIRED" if d < 0 else f"expires in {d}d"
+                when = lc.domain_expiry.isoformat()
+                alerts.append(_Alert(d <= 0, name, f"domain {what} ({when})"))
+
+    provs = sorted({(h.server.provider or "").lower() for h, _ in rows} & set(_PROVIDER_CLIENTS))
+    for prov in provs:
+        burn, cur = _provider_monthly_burn(rows, prov)
+        if _billing_model(prov) == "prepaid":
+            acct = accounts.get(prov)
+            if acct is None:
+                continue
+            days, runout = _runway(acct.net_remaining, burn, today)
+            if days is not None and runout is not None and days <= rd:
+                alerts.append(_Alert(
+                    days <= cd, prov.capitalize(),
+                    f"credit runs out in ~{days}d ({runout.isoformat()}) → card charges begin",
+                ))
+        elif burn:  # postpaid with real cost
+            nxt = _first_of_next_month(today)
+            d = (nxt - today).days
+            if d <= cd:
+                est = f"≈ {cur} {burn:.2f}, " if cur else ""
+                alerts.append(_Alert(False, prov.capitalize(),
+                                     f"charge in {d}d ({est}{nxt.isoformat()})"))
+    return alerts
+
+
+def _push_alerts(alerts: list[_Alert], config: Config) -> None:
+    title = f"vordr · {len(alerts)} alert(s)"
+    body = "\n".join(f"{'!' if a.crit else '-'} {a.who}: {a.text}" for a in alerts)
+    try:
+        sent = notify.send(title, body, ntfy=config.ntfy, critical=any(a.crit for a in alerts))
+    except notify.NotifyError as exc:
+        err_console.print(f"[red]notify failed:[/] {exc}")
+        return
+    if sent:
+        console.print(indent(meta(f"pushed to {', '.join(sent)}")))
+    else:
+        console.print(indent(meta(
+            "no notify channel — set [notify] ntfy in the config or $VORDR_NTFY_URL")))
+
+
+@app.command()
+def check(
+    notify_: bool = typer.Option(
+        False, "--notify", help="Push the alerts to the configured channel (ntfy)."
+    ),
+    timeout: int = typer.Option(
+        rdap.DEFAULT_TIMEOUT, help="Network/SSH query timeout (s)."
+    ),
+) -> None:
+    """Triage: show only what needs attention; exit non-zero if anything does.
+
+    Built for cron. Flags a bonus/credit about to run out (and the card charges that
+    follow), upcoming charges and renewals, expiring domains, and hosts that are
+    offline. With ``--notify`` it also pushes the alerts. Quiet when all is well.
+    """
+    config = _load_config(require_hosts=False)
+    today = date.today()
+    config_hosts = list(config.hosts.values())
+
+    servers, notes = _fetch_provider_servers(config_hosts, timeout=timeout, discover=True)
+    accounts, acct_notes = _fetch_provider_accounts(config_hosts, timeout=timeout)
+    notes += acct_notes
+    dom_exp = _resolve_domain_expiries(config_hosts, offline=False, timeout=timeout)
+    rows = _assemble_rows(config_hosts, servers, dom_exp, today, discover=True)
+
+    ssh_hosts = [h for h in config_hosts if h.ssh.strip()]
+    reach: dict[str, bool] = {}
+    if ssh_hosts:
+        metrics = _probe_all(ssh_hosts, lambda a: probe_system(a, timeout=timeout))
+        reach = {h.name: metrics[h.name].reachable for h in ssh_hosts}  # type: ignore[attr-defined]
+
+    alerts = _evaluate_alerts(rows, accounts, reach, config, today)
+
+    console.print()
+    console.print(indent(brand("check")))
+    console.print()
+    if not alerts:
+        console.print(indent(Text("✓ all clear", style=OK)))
+        console.print()
+        for note in notes:
+            console.print(indent(meta(note)))
+        raise typer.Exit(0)
+
+    for a in alerts:
+        style = "bold red" if a.crit else "yellow"
+        line = Text("  ")
+        line.append("● " if a.crit else "▲ ", style=style)
+        line.append(a.who, style="bold")
+        line.append("  ·  ", style=MUTED)
+        line.append(a.text, style=style if a.crit else "")
+        console.print(line)
+
+    console.print()
+    crit = sum(1 for a in alerts if a.crit)
+    console.print(indent(meta(f"{len(alerts)} alert(s), {crit} critical")))
+    if notify_:
+        _push_alerts(alerts, config)
+    for note in notes:
+        console.print(indent(meta(note)))
+    raise typer.Exit(1)
 
 
 def _version_callback(value: bool) -> None:
