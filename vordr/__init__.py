@@ -5,4 +5,4 @@ passar apenas quem é digno. Aqui ele monta guarda diante dos seus servidores:
 observa status, recursos, prazos de cobrança e sinais de comprometimento.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
