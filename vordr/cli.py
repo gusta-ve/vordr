@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -159,21 +160,154 @@ def hosts() -> None:
     console.print(f"[dim]fonte: {config.source or config_path()}[/dim]")
 
 
+def _is_interactive() -> bool:
+    """Há um terminal de verdade para fazer perguntas? (falso em pipes/testes)."""
+    return sys.stdin.isatty()
+
+
 @app.command()
 def init(
     force: bool = typer.Option(False, "--force", "-f", help="Sobrescreve config existente."),
 ) -> None:
-    """Cria um arquivo de configuração inicial em ~/.config/vordr/config.toml."""
+    """Cria o config. Num terminal, vira um assistente que importa seus servidores.
+
+    Com um token salvo, o ``init`` lista os servidores da conta e monta o config para
+    você — sem escrever TOML na mão. Sem terminal (pipe/CI) ou sem token, escreve um
+    modelo comentado.
+    """
     path = config_path()
+    interactive = _is_interactive()
     if path.exists() and not force:
-        err_console.print(
-            f"[yellow]já existe:[/] {path}\nUse [bold]--force[/] para sobrescrever."
-        )
-        raise typer.Exit(1)
+        overwrite = interactive and typer.confirm(f"{path} já existe. Sobrescrever?", default=False)
+        if not overwrite:
+            err_console.print(
+                f"[yellow]já existe:[/] {path}\nUse [bold]--force[/] para sobrescrever."
+            )
+            raise typer.Exit(1)
+
+    blocks = _wizard_import() if interactive else []
+    content = _render_config(blocks) if blocks else CONFIG_TEMPLATE
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(CONFIG_TEMPLATE, encoding="utf-8")
+    path.write_text(content, encoding="utf-8")
     console.print(f"[green]✔[/] configuração criada em [bold]{path}[/]")
-    console.print("[dim]edite as datas de cobrança e rode `vordr cost`.[/dim]")
+    if blocks:
+        console.print(
+            f"[dim]{len(blocks)} host(s) importado(s). Rode `vordr cost` ou `vordr status`.[/dim]"
+        )
+    else:
+        console.print(
+            "[dim]edite os hosts (ou rode `vordr secret set` e `vordr init` de novo "
+            "para importar da API) e use `vordr cost`.[/dim]"
+        )
+
+
+def _suggest_alias(name: str, aliases: list[str]) -> str | None:
+    """Casa o nome do servidor com um alias SSH (igualdade ou substring)."""
+    low = name.lower()
+    for alias in aliases:
+        al = alias.lower()
+        if al == low or al in low or low in al:
+            return alias
+    return None
+
+
+def _toml_key(value: str, used: set[str]) -> str:
+    """Chave de tabela TOML segura e única (A-Za-z0-9_-)."""
+    base = "".join(c if (c.isalnum() or c in "_-") else "-" for c in value).strip("-") or "host"
+    key, n = base, 2
+    while key in used:
+        key, n = f"{base}-{n}", n + 1
+    used.add(key)
+    return key
+
+
+def _render_host_block(key: str, alias: str, provider: str, sb, cost: float | None) -> str:
+    lines = [
+        f"[hosts.{key}]",
+        f'ssh = "{alias}"',
+        f'label = "{sb.name}"',
+        "",
+        f"  [hosts.{key}.server]",
+        f'  provider = "{provider}"',
+    ]
+    if cost is not None:
+        lines.append(f"  cost = {cost}")
+        lines.append(f'  currency = "{sb.currency}"')
+        lines.append("  # preço fixo (vence a API). Apague para voltar ao valor da API.")
+    else:
+        lines.append("  # custo e since vêm da API automaticamente (preço de lista).")
+    return "\n".join(lines)
+
+
+def _render_config(blocks: list[str]) -> str:
+    header = (
+        "# Configuração do Vordr — gerada por `vordr init`.\n"
+        "# Campos em branco são preenchidos pela API/RDAP; o que você escrever vence.\n\n"
+        "[thresholds]\n"
+        "warn_days = 14\n"
+        "critical_days = 7\n\n"
+    )
+    return header + "\n\n".join(blocks) + "\n"
+
+
+def _wizard_import() -> list[str]:
+    """Assistente interativo: descobre servidores pela API e monta blocos de config."""
+    tokened = [p for p in _PROVIDER_CLIENTS if secrets.get_token(p)]
+    if not tokened:
+        console.print("[dim]Nenhum token de provedor salvo.[/]")
+        choice = typer.prompt(
+            f"Configurar um agora? Provedor ({'/'.join(secrets.ENV_VARS)}) ou enter p/ pular",
+            default="",
+            show_default=False,
+        ).strip().lower()
+        if choice in secrets.ENV_VARS and _store_token_flow(choice):
+            tokened = [choice]
+        if not tokened:
+            return []
+
+    discovered: dict[str, dict[str, providers.ServerBilling]] = {}
+    for prov in tokened:
+        try:
+            discovered[prov] = _PROVIDER_CLIENTS[prov].fetch_servers(
+                secrets.get_token(prov), timeout=15
+            )
+        except providers.ProviderError as exc:
+            err_console.print(f"[red]{prov}: {exc}[/]")
+
+    total = sum(len(c) for c in discovered.values())
+    if not total:
+        console.print("[yellow]Nenhum servidor encontrado nas contas.[/]")
+        return []
+    console.print(f"[cyan]{total} servidor(es) encontrado(s).[/] Mapeie cada um:")
+
+    aliases = ssh.list_aliases()
+    blocks: list[str] = []
+    used: set[str] = set()
+    for prov in sorted(discovered):
+        for name, sb in sorted(discovered[prov].items()):
+            if not typer.confirm(f"  importar '{name}' ({prov.capitalize()})?", default=True):
+                continue
+            suggestion = _suggest_alias(name, aliases) or name
+            alias = typer.prompt("    alias SSH (p/ status/resources)", default=suggestion).strip()
+            api_hint = (
+                f"{sb.currency} {sb.cost_gross:.2f}"
+                if sb.cost_gross is not None
+                else "desconhecido"
+            )
+            cost_in = typer.prompt(
+                f"    preço/mês fixo? (enter = usar a API: {api_hint})",
+                default="",
+                show_default=False,
+            ).strip()
+            cost: float | None = None
+            if cost_in:
+                try:
+                    cost = round(float(cost_in.replace(",", ".")), 2)
+                except ValueError:
+                    console.print("[yellow]    valor inválido — usando o da API.[/]")
+            key = _toml_key(alias or name, used)
+            blocks.append(_render_host_block(key, alias or name, prov.capitalize(), sb, cost))
+    return blocks
 
 
 secret_app = typer.Typer(
@@ -181,6 +315,24 @@ secret_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(secret_app, name="secret")
+
+
+def _store_token_flow(provider: str) -> bool:
+    """Pede, valida (com uma leitura na API) e grava o token. True se gravou."""
+    token = typer.prompt(f"Token da API ({provider})", hide_input=True).strip()
+    if not token:
+        err_console.print("[red]token vazio.[/]")
+        return False
+    client = _PROVIDER_CLIENTS.get(provider)
+    if client is not None:  # valida com uma leitura antes de gravar
+        try:
+            client.fetch_servers(token, timeout=15)
+        except providers.ProviderError as exc:
+            err_console.print(f"[red]token rejeitado:[/] {exc}")
+            return False
+    path = secrets.set_token(provider, token)
+    console.print(f"[green]✔[/] token de [bold]{provider}[/] salvo em [bold]{path}[/] (chmod 600)")
+    return True
 
 
 @secret_app.command("set")
@@ -195,19 +347,8 @@ def secret_set(
             f"(conhecidos: {', '.join(secrets.ENV_VARS)})"
         )
         raise typer.Exit(2)
-    token = typer.prompt(f"Token da API ({provider})", hide_input=True).strip()
-    if not token:
-        err_console.print("[red]token vazio.[/]")
+    if not _store_token_flow(provider):
         raise typer.Exit(1)
-    client = _PROVIDER_CLIENTS.get(provider)
-    if client is not None:  # valida com uma leitura antes de gravar
-        try:
-            client.fetch_servers(token, timeout=15)
-        except providers.ProviderError as exc:
-            err_console.print(f"[red]token rejeitado:[/] {exc}")
-            raise typer.Exit(1) from exc
-    path = secrets.set_token(provider, token)
-    console.print(f"[green]✔[/] token de [bold]{provider}[/] salvo em [bold]{path}[/] (chmod 600)")
     console.print(
         f"[dim]a variável de ambiente {secrets.ENV_VARS[provider]} tem prioridade "
         f"sobre o arquivo, se definida.[/dim]"

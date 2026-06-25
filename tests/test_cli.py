@@ -387,6 +387,8 @@ def test_secret_set_unknown_provider(monkeypatch, tmp_path):
 def test_init_creates_config(monkeypatch, tmp_path):
     path = tmp_path / "config.toml"
     monkeypatch.setenv("VORDR_CONFIG", str(path))
+    _isolate_secrets(monkeypatch, tmp_path)
+    # não-interativo (CliRunner) → escreve o template comentado
     result = runner.invoke(cli.app, ["init"])
     assert result.exit_code == 0
     assert path.exists()
@@ -394,6 +396,58 @@ def test_init_creates_config(monkeypatch, tmp_path):
     # segunda vez sem --force deve falhar
     again = runner.invoke(cli.app, ["init"])
     assert again.exit_code == 1
+
+
+def test_init_wizard_imports_from_api(monkeypatch, tmp_path):
+    from datetime import date
+
+    from vordr.providers import ServerBilling
+
+    path = tmp_path / "config.toml"
+    monkeypatch.setenv("VORDR_CONFIG", str(path))
+    _isolate_secrets(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "_is_interactive", lambda: True)
+    monkeypatch.setattr(cli.secrets, "get_token", lambda p: "tok" if p == "hetzner" else None)
+    monkeypatch.setattr(
+        cli.hetzner,
+        "fetch_servers",
+        lambda token, timeout=15: {
+            "ubuntu-nexus": ServerBilling("ubuntu-nexus", date(2026, 5, 1), 6.49, 6.49, "EUR")
+        },
+    )
+    monkeypatch.setattr(cli.ssh, "list_aliases", lambda: ["nexus", "db"])
+    # confirma importar (enter=sim) / alias default (enter) / preço fixo vazio (enter)
+    result = runner.invoke(cli.app, ["init"], input="\n\n\n")
+    assert result.exit_code == 0
+    text = path.read_text()
+    assert 'provider = "Hetzner"' in text
+    assert 'ssh = "nexus"' in text          # alias sugerido a partir de ubuntu-nexus
+    assert "[hosts.nexus]" in text
+
+
+def test_init_wizard_pins_promo_price(monkeypatch, tmp_path):
+    from datetime import date
+
+    from vordr.providers import ServerBilling
+
+    path = tmp_path / "config.toml"
+    monkeypatch.setenv("VORDR_CONFIG", str(path))
+    _isolate_secrets(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "_is_interactive", lambda: True)
+    monkeypatch.setattr(cli.secrets, "get_token", lambda p: "tok" if p == "hetzner" else None)
+    monkeypatch.setattr(
+        cli.hetzner,
+        "fetch_servers",
+        lambda token, timeout=15: {
+            "ubuntu-nexus": ServerBilling("ubuntu-nexus", date(2026, 5, 1), 6.49, 6.49, "EUR")
+        },
+    )
+    monkeypatch.setattr(cli.ssh, "list_aliases", lambda: [])
+    # importar / alias "nexus" / preço fixo "4.99"
+    result = runner.invoke(cli.app, ["init"], input="\nnexus\n4.99\n")
+    assert result.exit_code == 0
+    text = path.read_text()
+    assert "cost = 4.99" in text
 
 
 def test_status_uses_probe(monkeypatch, tmp_path):

@@ -7,9 +7,11 @@ Vordr nunca guarda IPs nem credenciais. Ele apoia-se inteiramente no seu
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 DEFAULT_TIMEOUT = 20
 
@@ -38,6 +40,35 @@ class SSHError(RuntimeError):
 def ssh_available() -> bool:
     """Indica se o binário ``ssh`` está disponível no PATH."""
     return shutil.which("ssh") is not None
+
+
+def config_path() -> Path:
+    return Path(os.environ.get("SSH_CONFIG", "~/.ssh/config")).expanduser()
+
+
+def list_aliases(path: Path | None = None) -> list[str]:
+    """Lê os aliases ``Host`` do ``~/.ssh/config`` (ignora padrões com curinga).
+
+    Usado pelo ``vordr init`` para sugerir o alias de cada servidor descoberto.
+    """
+    path = path or config_path()
+    if not path.exists():
+        return []
+    aliases: list[str] = []
+    seen: set[str] = set()
+    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, _, rest = line.partition(" ")
+        if key.lower() != "host":
+            continue
+        for token in rest.replace("\t", " ").split():
+            if any(c in token for c in "*?!") or token in seen:
+                continue
+            seen.add(token)
+            aliases.append(token)
+    return aliases
 
 
 def run(

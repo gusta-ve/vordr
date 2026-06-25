@@ -75,8 +75,13 @@ hospedagem) e `[hosts.X.domain]` (o domínio) — ambos com campos **todos opcio
 preenchidos pela API/RDAP quando você os deixa em branco.
 
 ```bash
-vordr init        # cria ~/.config/vordr/config.toml comentado
+vordr init        # assistente: importa os servidores da API e mapeia aliases SSH
 ```
+
+Num terminal, `vordr init` é um **assistente**: com um token salvo, ele lista os
+servidores da conta, sugere o alias SSH de cada um (lendo seu `~/.ssh/config`) e
+pergunta se há um preço fixo a travar — gerando o config sem você escrever TOML. Em
+pipe/CI, ou sem token, escreve um modelo comentado.
 
 ```toml
 [thresholds]
