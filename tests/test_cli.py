@@ -237,6 +237,85 @@ def test_cost_hints_when_provider_token_missing(monkeypatch, tmp_path):
     assert "secret set hetzner" in result.stdout
 
 
+def test_billing_prepaid_shows_credit_and_runway(monkeypatch, tmp_path):
+    from datetime import date
+
+    from vordr.providers import AccountBilling, ServerBilling
+
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[hosts.box]\nssh = "box"\nlabel = "Box"\n'
+        '  [hosts.box.server]\n  provider = "Vultr"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("VORDR_CONFIG", str(path))
+    monkeypatch.setenv("COLUMNS", "200")
+    _isolate_secrets(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.secrets, "get_token", lambda p: "tok" if p == "vultr" else None)
+    monkeypatch.setattr(
+        cli.vultr,
+        "fetch_servers",
+        lambda token, timeout=15: {
+            "Box": ServerBilling("Box", date(2026, 5, 1), 60.0, 60.0, "USD")
+        },
+    )
+    monkeypatch.setattr(
+        cli.vultr,
+        "fetch_account",
+        lambda token, timeout=15: AccountBilling(balance=-193.88, pending_charges=79.02),
+    )
+    result = runner.invoke(cli.app, ["billing"])
+    assert result.exit_code == 0
+    out = result.stdout
+    assert "Vultr" in out
+    assert "193.88" in out          # crédito
+    assert "114.86" in out          # líquido
+    assert "runway" in out.lower()
+
+
+def test_billing_postpaid_shows_next_charge(monkeypatch, tmp_path):
+    _provider_config(monkeypatch, tmp_path)  # provider = Hetzner
+    monkeypatch.setattr(cli.secrets, "get_token", lambda p: None)
+    result = runner.invoke(cli.app, ["billing", "--offline"])
+    assert result.exit_code == 0
+    out = result.stdout.lower()
+    assert "hetzner" in out
+    assert "postpago" in out
+
+
+def test_cost_shows_balance_summary_line(monkeypatch, tmp_path):
+    from datetime import date
+
+    from vordr.providers import AccountBilling, ServerBilling
+
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[hosts.box]\nssh = "box"\nlabel = "Box"\n'
+        '  [hosts.box.server]\n  provider = "Vultr"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("VORDR_CONFIG", str(path))
+    monkeypatch.setenv("COLUMNS", "200")
+    _isolate_secrets(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.secrets, "get_token", lambda p: "tok" if p == "vultr" else None)
+    monkeypatch.setattr(
+        cli.vultr,
+        "fetch_servers",
+        lambda token, timeout=15: {
+            "Box": ServerBilling("Box", date(2026, 5, 1), 60.0, 60.0, "USD")
+        },
+    )
+    monkeypatch.setattr(
+        cli.vultr,
+        "fetch_account",
+        lambda token, timeout=15: AccountBilling(balance=-193.88, pending_charges=79.02),
+    )
+    result = runner.invoke(cli.app, ["cost"])
+    assert result.exit_code == 0
+    assert "crédito" in result.stdout
+    assert "193.88" in result.stdout
+
+
 def test_secret_status(monkeypatch, tmp_path):
     _isolate_secrets(monkeypatch, tmp_path)
     monkeypatch.setenv("COLUMNS", "200")

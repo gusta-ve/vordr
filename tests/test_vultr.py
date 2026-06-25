@@ -46,3 +46,34 @@ def test_fetch_servers_wires_plans_and_instances(monkeypatch):
     monkeypatch.setattr(vultr, "_get", fake_get)
     servers = vultr.fetch_servers("tok")
     assert servers["SimpliMEI-Core-Production"].cost_gross == 48.0
+
+
+ACCOUNT = {
+    "account": {
+        "balance": -193.88,
+        "pending_charges": 79.02,
+        "last_payment_date": "2026-05-13T00:59:19+00:00",
+        "last_payment_amount": -250,
+    }
+}
+
+
+def test_parse_account_credit_and_pending():
+    acct = vultr.parse_account(ACCOUNT)
+    assert acct.balance == -193.88
+    assert acct.pending_charges == 79.02
+    assert acct.credit == 193.88           # saldo negativo vira crédito
+    assert acct.net_remaining == 114.86    # crédito - pendente
+
+
+def test_fetch_account_hits_account_endpoint(monkeypatch):
+    monkeypatch.setattr(vultr, "_get", lambda url, token, timeout: ACCOUNT)
+    acct = vultr.fetch_account("tok")
+    assert acct.credit == 193.88
+
+
+def test_postpaid_account_balance_unknown():
+    from vordr.providers import AccountBilling
+
+    assert AccountBilling().credit is None
+    assert AccountBilling().net_remaining is None

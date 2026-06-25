@@ -15,11 +15,15 @@ import json
 import urllib.error
 import urllib.request
 
-from .providers import ProviderError, ServerBilling, parse_api_date, to_amount
+from .providers import AccountBilling, ProviderError, ServerBilling, parse_api_date, to_amount
 
 INSTANCES_URL = "https://api.vultr.com/v2/instances?per_page=500"
 PLANS_URL = "https://api.vultr.com/v2/plans?per_page=500"
+ACCOUNT_URL = "https://api.vultr.com/v2/account"
 DEFAULT_TIMEOUT = 15
+
+# A Vultr é pré-paga: o uso é debitado de um saldo/crédito (ex.: bônus de cadastro).
+BILLING_MODEL = "prepaid"
 
 
 class VultrError(ProviderError):
@@ -76,3 +80,17 @@ def fetch_servers(token: str, *, timeout: int = DEFAULT_TIMEOUT) -> dict[str, Se
     plan_costs = _plan_costs(token, timeout)
     instances = _get(INSTANCES_URL, token, timeout)
     return parse_instances(instances, plan_costs)
+
+
+def parse_account(payload: dict) -> AccountBilling:
+    acc = payload.get("account", payload)
+    return AccountBilling(
+        balance=to_amount(acc.get("balance")),
+        pending_charges=to_amount(acc.get("pending_charges")),
+        currency="USD",
+    )
+
+
+def fetch_account(token: str, *, timeout: int = DEFAULT_TIMEOUT) -> AccountBilling:
+    """Saldo e cobranças pendentes da conta. Levanta :class:`VultrError` em falha."""
+    return parse_account(_get(ACCOUNT_URL, token, timeout))

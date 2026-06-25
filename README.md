@@ -110,6 +110,7 @@ vordr security            # auditoria: logins, falhas, portas, fail2ban, updates
 vordr cost                # tabela: hospedagem, renovação de servidor/domínio, custo/mês
 vordr cost web            # painel detalhado do ciclo de vida de um host
 vordr cost --offline      # sem rede: usa só o que está no config
+vordr billing             # saldo/crédito e próxima cobrança por provedor
 vordr hosts               # lista o que está configurado
 
 vordr secret set hetzner  # guarda o token da API (chmod 600, fora do repo)
@@ -139,6 +140,19 @@ aparecem marcados com `(API)` / `(RDAP)`.
 > promocional/travado, informe `cost` no config (ele vence). A API da **Vultr** usa
 > allowlist de IP e o token é *full-access* (não há read-only): cuide bem dele.
 
+### Saldo e próxima cobrança (`vordr billing`)
+
+Com o token configurado, `vordr billing` responde *quando* e *de onde* sai a cobrança
+— cada provedor tem um modelo:
+
+- **Pré-pago (ex.: Vultr):** mostra **crédito**, **uso pendente** do ciclo e o
+  **runway** — quantos dias o saldo ainda cobre (somando o custo dos servidores da
+  conta) e a data em que ele esgota. Útil quando se roda em cima de bônus/crédito: a
+  cobrança no cartão só começa quando o saldo zera. Um resumo dessa linha aparece
+  também no rodapé do `vordr cost`.
+- **Postpago (ex.: Hetzner):** a Cloud API **não expõe saldo**; o `billing` mostra a
+  **próxima data de cobrança** (1º do mês seguinte) e o custo mensal estimado.
+
 ## Como funciona
 
 | Camada            | Arquivo            | Responsabilidade                                   |
@@ -147,7 +161,7 @@ aparecem marcados com `(API)` / `(RDAP)`.
 | Coleta de métrica | `vordr/probe.py`   | Scripts `sh` → `CHAVE=valor` → dataclasses.        |
 | Configuração      | `vordr/config.py`  | Lê o TOML; cálculo de dias/custo.                  |
 | Expiração domínio | `vordr/rdap.py`    | RDAP público + cache em disco (sem credencial).    |
-| API de provedor   | `vordr/hetzner.py` | Cliente read-only da Hetzner (since + preço).      |
+| API de provedor   | `vordr/hetzner.py`, `vordr/vultr.py` | Clientes read-only (since, preço e saldo). |
 | Segredos          | `vordr/secrets.py` | Tokens fora do repo (env > arquivo chmod 600).     |
 | Formatação        | `vordr/format.py`  | Funções puras (uptime, bytes, limiares de cor).    |
 | CLI               | `vordr/cli.py`     | Typer + Rich; orquestra tudo em paralelo.          |

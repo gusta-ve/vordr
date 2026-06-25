@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 import typer
 from rich.console import Console
@@ -689,8 +689,11 @@ def cost(
 
     servers: dict[str, dict[str, hetzner.ServerBilling]] = {}
     notes: list[str] = []
+    accounts: dict[str, providers.AccountBilling] = {}
     if not offline:
         servers, notes = _fetch_provider_servers(selected, timeout=timeout)
+        accounts, acct_notes = _fetch_provider_accounts(selected, timeout=timeout)
+        notes += acct_notes
     dom_exp = _resolve_domain_expiries(selected, offline=offline, timeout=timeout)
     lifecycles = {
         h.name: _resolve_lifecycle(h, _match_server(h, servers), dom_exp.get(h.name), today)
@@ -724,6 +727,211 @@ def cost(
                 f"[dim]sem dados de cobrança: {', '.join(missing)} — "
                 f"edite {config.source or config_path()} (ou rode `vordr init`).[/dim]"
             )
+
+    for prov in sorted(accounts):
+        burn, _cur = _provider_monthly_burn(selected, lifecycles, prov)
+        console.print(_billing_summary_line(prov, accounts[prov], burn, today))
+
+    for note in notes:
+        console.print(f"[dim yellow]{note}[/]")
+
+
+# --- saldo & cobrança por provedor -------------------------------------------
+
+def _billing_model(prov: str) -> str:
+    """'prepaid' (crédito/saldo) ou 'postpaid' (cartão) — declarado pelo módulo."""
+    return getattr(_PROVIDER_CLIENTS.get(prov), "BILLING_MODEL", "postpaid")
+
+
+def _first_of_next_month(today: date) -> date:
+    if today.month == 12:
+        return date(today.year + 1, 1, 1)
+    return date(today.year, today.month + 1, 1)
+
+
+def _fetch_provider_accounts(
+    hosts: list[Host], *, timeout: int
+) -> tuple[dict[str, providers.AccountBilling], list[str]]:
+    """Saldo das contas dos provedores referenciados que expõem ``fetch_account``."""
+    accounts: dict[str, providers.AccountBilling] = {}
+    notes: list[str] = []
+    referenced = {
+        h.server.provider.lower()
+        for h in hosts
+        if h.server.provider and h.server.provider.lower() in _PROVIDER_CLIENTS
+    }
+    for prov in sorted(referenced):
+        client = _PROVIDER_CLIENTS[prov]
+        if not hasattr(client, "fetch_account"):
+            continue  # provedor postpago — sem saldo via API
+        if not secrets.get_token(prov):
+            continue  # token faltando já é avisado pelo fetch de servidores
+        try:
+            accounts[prov] = client.fetch_account(secrets.get_token(prov), timeout=timeout)
+        except providers.ProviderError as exc:
+            notes.append(f"{prov}: {exc}")
+    return accounts, notes
+
+
+def _provider_monthly_burn(
+    hosts: list[Host], lifecycles: dict[str, _Lifecycle], prov: str
+) -> tuple[float | None, str | None]:
+    """Soma o custo mensal dos hosts de um provedor (o 'burn' que consome o saldo)."""
+    total, currency, found = 0.0, None, False
+    for h in hosts:
+        if (h.server.provider or "").lower() != prov:
+            continue
+        lc = lifecycles[h.name]
+        if lc.cost is not None:
+            total += lc.cost
+            currency = lc.currency
+            found = True
+    return (round(total, 2), currency) if found else (None, None)
+
+
+def _runway(
+    net_remaining: float | None, monthly_burn: float | None, today: date
+) -> tuple[int | None, date | None]:
+    """Dias até o crédito esgotar, dado o consumo mensal."""
+    if net_remaining is None or not monthly_burn or monthly_burn <= 0:
+        return None, None
+    daily = monthly_burn / 30.0
+    days = int(net_remaining / daily)
+    return days, today + timedelta(days=days)
+
+
+def _billing_summary_line(
+    prov: str, acct: providers.AccountBilling, burn: float | None, today: date
+) -> str:
+    """Linha curta para o rodapé do `cost` (crédito + runway)."""
+    parts = [f"[bold]{prov.capitalize()}[/]"]
+    cr = acct.credit
+    if cr is not None:
+        parts.append(f"crédito {acct.currency} {cr:.2f}")
+    if acct.pending_charges:
+        parts.append(f"pendente {acct.currency} {acct.pending_charges:.2f}")
+    net = acct.net_remaining
+    if net is not None:
+        parts.append(f"líquido {acct.currency} {net:.2f}")
+    days, runout = _runway(net, burn, today)
+    if days is not None and runout is not None:
+        parts.append(f"runway ~{days}d → {runout.isoformat()}")
+    return "[dim]" + "  ·  ".join(parts) + "[/]"
+
+
+def _billing_panel(
+    prov: str,
+    acct: providers.AccountBilling | None,
+    burn: float | None,
+    currency: str | None,
+    config: Config,
+    today: date,
+    offline: bool,
+) -> Panel:
+    table = Table(show_header=False, box=None, pad_edge=False)
+    table.add_column("k", style="dim")
+    table.add_column("v")
+    table.add_row("provedor", prov.capitalize())
+
+    if _billing_model(prov) == "prepaid":
+        table.add_row("modelo", "pré-pago (crédito/saldo)")
+        if acct is None:
+            if offline:
+                detail = Text("— (modo offline)", style="dim")
+            elif not secrets.get_token(prov):
+                detail = Text(f"sem token — rode `vordr secret set {prov}`", style="yellow")
+            else:
+                detail = Text("indisponível", style="dim")
+            table.add_row("saldo", detail)
+        else:
+            cr = acct.credit
+            if cr is not None:
+                table.add_row("crédito", f"{acct.currency} {cr:.2f}")
+            if acct.pending_charges:
+                table.add_row("pendente", f"{acct.currency} {acct.pending_charges:.2f}")
+            net = acct.net_remaining
+            if net is not None:
+                table.add_row("líquido", Text(f"{acct.currency} {net:.2f}", style="bold"))
+            days, runout = _runway(net, burn, today)
+            if days is not None and runout is not None:
+                style = days_left_style(days, warn=config.warn_days, critical=config.critical_days)
+                table.add_row(
+                    "runway",
+                    Text(f"~{days} dias  (esgota {runout.isoformat()})", style=style),
+                )
+                table.add_row(
+                    "cobrança", Text("via crédito — sem cartão até o saldo esgotar", style="dim")
+                )
+            else:
+                table.add_row("cobrança", Text("via crédito", style="dim"))
+    else:  # postpago — cobrado no cartão, calendário fixo
+        table.add_row("modelo", "postpago (cartão)")
+        nxt = _first_of_next_month(today)
+        days = (nxt - today).days
+        est = f"  (≈ {currency} {burn:.2f} / mês)" if burn is not None and currency else ""
+        table.add_row(
+            "próxima cobrança",
+            Text(
+                f"{nxt.isoformat()}  (em {days}d){est}",
+                style=days_left_style(days, warn=config.warn_days, critical=config.critical_days),
+            ),
+        )
+        table.add_row(
+            "saldo", Text(f"— (não exposto pela API da {prov.capitalize()})", style="dim")
+        )
+
+    return Panel(table, title=f"[bold cyan]{prov.capitalize()}[/]", border_style="cyan")
+
+
+@app.command()
+def billing(
+    offline: bool = typer.Option(
+        False, "--offline", help="Não consultar a API; mostra só o modelo de cobrança."
+    ),
+    timeout: int = typer.Option(
+        rdap.DEFAULT_TIMEOUT, help="Timeout das consultas à API do provedor (s)."
+    ),
+) -> None:
+    """Saldo, crédito e próxima cobrança de cada provedor.
+
+    Para provedores pré-pagos (ex.: Vultr) mostra crédito, uso pendente e o
+    *runway* — quando o saldo esgota e a cobrança no cartão começa. Para postpagos
+    (ex.: Hetzner) mostra a próxima data de cobrança e o custo estimado.
+    """
+    config = _load_config()
+    hosts = list(config.hosts.values())
+    today = date.today()
+
+    servers: dict[str, dict[str, providers.ServerBilling]] = {}
+    notes: list[str] = []
+    accounts: dict[str, providers.AccountBilling] = {}
+    if not offline:
+        servers, notes = _fetch_provider_servers(hosts, timeout=timeout)
+        accounts, acct_notes = _fetch_provider_accounts(hosts, timeout=timeout)
+        notes += acct_notes
+    lifecycles = {
+        h.name: _resolve_lifecycle(h, _match_server(h, servers), None, today) for h in hosts
+    }
+
+    referenced = sorted(
+        {
+            h.server.provider.lower()
+            for h in hosts
+            if h.server.provider and h.server.provider.lower() in _PROVIDER_CLIENTS
+        }
+    )
+    if not referenced:
+        console.print(
+            "[yellow]Nenhum host com provedor de API suportado.[/] "
+            'Defina provider = "Hetzner" ou "Vultr" no config.'
+        )
+        raise typer.Exit(0)
+
+    for prov in referenced:
+        burn, currency = _provider_monthly_burn(hosts, lifecycles, prov)
+        console.print(
+            _billing_panel(prov, accounts.get(prov), burn, currency, config, today, offline)
+        )
 
     for note in notes:
         console.print(f"[dim yellow]{note}[/]")

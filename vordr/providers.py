@@ -27,6 +27,35 @@ class ServerBilling:
     currency: str = "USD"
 
 
+@dataclass
+class AccountBilling:
+    """Saldo/cobrança da **conta** de um provedor (não de um servidor específico).
+
+    ``balance`` segue a convenção da Vultr: **negativo = crédito a seu favor**
+    (ex.: bônus de cadastro). ``pending_charges`` é o uso já acumulado no ciclo
+    atual, ainda não deduzido. Provedores postpagos (cartão) podem não expor saldo.
+    """
+
+    balance: float | None = None
+    pending_charges: float | None = None
+    currency: str = "USD"
+
+    @property
+    def credit(self) -> float | None:
+        """Crédito disponível (saldo negativo vira positivo). ``None`` se desconhecido."""
+        if self.balance is None:
+            return None
+        return round(-self.balance, 2) if self.balance < 0 else 0.0
+
+    @property
+    def net_remaining(self) -> float | None:
+        """Crédito após descontar o uso pendente do ciclo."""
+        cr = self.credit
+        if cr is None:
+            return None
+        return round(cr - (self.pending_charges or 0.0), 2)
+
+
 def parse_api_date(raw: object) -> date | None:
     """Converte um timestamp ISO-8601 (com ``Z``) em :class:`date`."""
     if not isinstance(raw, str):

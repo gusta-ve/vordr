@@ -17,6 +17,11 @@ from .providers import ProviderError, ServerBilling, parse_api_date, to_amount
 API_URL = "https://api.hetzner.cloud/v1/servers"
 DEFAULT_TIMEOUT = 15
 
+# A Hetzner cobra no cartão, postpago (dia 1º do mês seguinte). A Cloud API NÃO
+# expõe saldo nem fatura — isso vive só no console web — então não há fetch_account:
+# a cobrança é tratada por calendário (próximo dia 1º) + custo estimado.
+BILLING_MODEL = "postpaid"
+
 
 class HetznerError(ProviderError):
     """Falha ao falar com a API da Hetzner (token inválido, rede, etc.)."""
