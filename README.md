@@ -205,11 +205,19 @@ vordr check --notify   # also push the alerts to your phone (ntfy)
 
 Thresholds live in `[alerts]` (`runway_days`, default 14; `charge_days`, default 7).
 With `--notify`, alerts are pushed via **ntfy** — no account, just a topic; set
-`[notify] ntfy = "https://ntfy.sh/<topic>"` (or `VORDR_NTFY_URL`). Run it daily from cron:
+`[notify] ntfy = "https://ntfy.sh/<topic>"` (or `VORDR_NTFY_URL`).
 
-```cron
-0 9 * * *  vordr check --notify >/dev/null 2>&1
-```
+### Scheduling — your call, nothing installed for you
+
+`vordr check` runs once and exits; vordr never touches your system scheduler. Pick what
+suits you:
+
+- **Self-contained loop** — `vordr check --watch 6h --notify` keeps itself on an interval
+  in the foreground (run it in `tmux`, or as the user service below). No system changes.
+- **Per-user systemd timer** — a ready-made, fully reversible unit lives in
+  [`examples/systemd/`](examples/systemd/): copy it to `~/.config/systemd/user/` and
+  `systemctl --user enable --now vordr-check.timer`. It's yours to remove anytime.
+- **Your own cron/launchd** — if you already run one, just add `vordr check --notify`.
 
 ## How it works
 

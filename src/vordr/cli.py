@@ -1250,21 +1250,20 @@ def _push_alerts(alerts: list[_Alert], config: Config) -> None:
             "no notify channel — set [notify] ntfy in the config or $VORDR_NTFY_URL")))
 
 
-@app.command()
-def check(
-    notify_: bool = typer.Option(
-        False, "--notify", help="Push the alerts to the configured channel (ntfy)."
-    ),
-    timeout: int = typer.Option(
-        rdap.DEFAULT_TIMEOUT, help="Network/SSH query timeout (s)."
-    ),
-) -> None:
-    """Triage: show only what needs attention; exit non-zero if anything does.
+def _parse_interval(value: str) -> int:
+    """Parse ``30m`` / ``6h`` / ``1d`` (or bare seconds) into seconds."""
+    s = value.strip().lower()
+    units = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    try:
+        if s and s[-1] in units:
+            return max(1, int(float(s[:-1]) * units[s[-1]]))
+        return max(1, int(float(s)))
+    except ValueError as exc:
+        raise typer.BadParameter(f"invalid interval '{value}' (try 30m, 6h, 1d)") from exc
 
-    Built for cron. Flags a bonus/credit about to run out (and the card charges that
-    follow), upcoming charges and renewals, expiring domains, and hosts that are
-    offline. With ``--notify`` it also pushes the alerts. Quiet when all is well.
-    """
+
+def _check_once(notify_: bool, timeout: int) -> int:
+    """Run the triage once: render it and (optionally) push. Returns the alert count."""
     config = _load_config(require_hosts=False)
     today = date.today()
     config_hosts = list(config.hosts.values())
@@ -1291,7 +1290,7 @@ def check(
         console.print()
         for note in notes:
             console.print(indent(meta(note)))
-        raise typer.Exit(0)
+        return 0
 
     for a in alerts:
         style = "bold red" if a.crit else "yellow"
@@ -1309,7 +1308,38 @@ def check(
         _push_alerts(alerts, config)
     for note in notes:
         console.print(indent(meta(note)))
-    raise typer.Exit(1)
+    return len(alerts)
+
+
+@app.command()
+def check(
+    notify_: bool = typer.Option(
+        False, "--notify", help="Push the alerts to the configured channel (ntfy)."
+    ),
+    watch: str = typer.Option(
+        "", "--watch", "-w", help="Re-run on an interval (e.g. 30m, 6h, 1d) instead of once."
+    ),
+    timeout: int = typer.Option(
+        rdap.DEFAULT_TIMEOUT, help="Network/SSH query timeout (s)."
+    ),
+) -> None:
+    """Triage: show only what needs attention; exit non-zero if anything does.
+
+    Flags a bonus/credit about to run out (and the card charges that follow), upcoming
+    charges and renewals, expiring domains, and hosts that are offline. With ``--notify``
+    it also pushes the alerts. Quiet when all is well.
+
+    By default it runs once and exits — pair it with whatever scheduler you already use
+    (a per-user systemd timer, launchd, cron…). With ``--watch`` it keeps itself on an
+    interval in the foreground, touching nothing on the system.
+    """
+    if watch:
+        every = _parse_interval(watch)
+        while True:
+            _check_once(notify_, timeout)
+            console.print(indent(meta(f"next check in {watch}")))
+            time.sleep(every)
+    raise typer.Exit(1 if _check_once(notify_, timeout) else 0)
 
 
 def _version_callback(value: bool) -> None:

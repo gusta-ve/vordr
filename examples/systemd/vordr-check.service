@@ -1,0 +1,16 @@
+# A per-user systemd service for `vordr check` — install it yourself, remove it
+# whenever. It touches nothing system-wide (lives under ~/.config/systemd/user/).
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp examples/systemd/vordr-check.* ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now vordr-check.timer
+#   # later:  systemctl --user disable --now vordr-check.timer
+
+[Unit]
+Description=vordr check — alert on charges, runway and offline hosts
+
+[Service]
+Type=oneshot
+# pipx puts the binary here; adjust if yours lives elsewhere (`which vordr`).
+ExecStart=%h/.local/bin/vordr check --notify

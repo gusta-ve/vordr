@@ -51,6 +51,14 @@ def test_evaluate_server_and_domain_expiry():
     assert "domain expires in 2d" in txt
 
 
+def test_parse_interval():
+    assert cli._parse_interval("30m") == 1800
+    assert cli._parse_interval("6h") == 21600
+    assert cli._parse_interval("1d") == 86400
+    assert cli._parse_interval("45") == 45        # bare seconds
+    assert cli._parse_interval("0") == 1          # clamped to >= 1
+
+
 def test_check_all_clear_exits_zero(monkeypatch, tmp_path):
     path = tmp_path / "config.toml"
     path.write_text("[thresholds]\nwarn_days = 14\n", encoding="utf-8")

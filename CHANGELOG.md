@@ -3,6 +3,13 @@
 All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.8.1]
+
+### Added
+- **`vordr check --watch 6h`** — a self-contained interval loop, so scheduling needs no
+  system changes. Example per-user systemd units live in `examples/systemd/` (you install
+  them; vordr never touches your scheduler).
+
 ## [0.8.0]
 
 ### Added
