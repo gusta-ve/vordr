@@ -41,51 +41,28 @@ err_console = Console(stderr=True)
 CONFIG_TEMPLATE = """\
 # Configuração do Vordr — ~/.config/vordr/config.toml
 #
-# Os hosts são apenas ALIASES do seu ~/.ssh/config. Nenhum IP ou segredo aqui.
-# As datas de cobrança/expiração são informadas por você (o servidor não sabe
-# quando o provedor ou o registrar vão cobrar de novo).
-#
-# Cada host tem dois blocos opcionais de ciclo de vida:
-#   [hosts.X.server]  — a hospedagem (provedor, desde quando, renovação, custo)
-#   [hosts.X.domain]  — o domínio    (registrar, expiração, custo)
-
-[thresholds]
-warn_days = 14       # avisa (amarelo) quando faltar <= esta qtd de dias
-critical_days = 7    # alerta (vermelho) quando faltar <= esta qtd de dias
+# Este arquivo é OPCIONAL: com um token (`vordr secret set hetzner|vultr`) o Vordr
+# descobre seus servidores sozinho. Use-o só para o que a API não sabe — um apelido,
+# o alias SSH (necessário para `status`) ou um preço travado (promoção/legado).
 
 [hosts.web]
-ssh = "web"                   # alias no ~/.ssh/config
-label = "Web"
-# status_command = "meu-status"   # opcional: seu script p/ `vordr status --raw`
+ssh = "web"                 # alias do ~/.ssh/config (use "" se o host não tiver SSH)
 
   [hosts.web.server]
-  provider = "Hetzner"        # com token (vordr secret set hetzner), since/custo
-  # provider_server = "web-01"  # nome do servidor na API, se != do alias
-  since   = "2024-03-01"      # vêm da API; o que você puser aqui sempre vence.
-  expires = "2026-08-15"      # AAAA-MM-DD — próxima renovação do servidor
-  cost = 6.99
-  currency = "USD"
-  cycle = "monthly"           # monthly | yearly
+  provider = "Hetzner"      # Hetzner | Vultr — habilita custo e since automáticos
+  # cost = 4.99             # opcional: trava um preço (vence o da API)
+  # currency = "EUR"
 
   [hosts.web.domain]
-  name = "web.exemplo.com"
-  registrar = "Cloudflare"
-  expires = "2027-03-01"      # quando o domínio expira
-  cost = 12.00
-  currency = "USD"
-  cycle = "yearly"
+  name = "web.exemplo.com"  # a expiração vem do RDAP automaticamente
 
-[hosts.db]
-ssh = "db"
-label = "DB"
-
-  [hosts.db.server]
-  provider = "DigitalOcean"
-  since   = "2025-01-10"
-  expires = "2026-07-30"
-  cost = 12.00
-  currency = "USD"
-  cycle = "monthly"
+# Opcionais por host:  label, status_command
+#   [server]: provider_server, since, expires, cost, currency, cycle (monthly|yearly)
+#   [domain]: registrar, expires, cost, currency, cycle
+# Limiares de alerta (padrão 14/7 dias):
+# [thresholds]
+# warn_days = 14
+# critical_days = 7
 """
 
 
