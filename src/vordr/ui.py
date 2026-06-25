@@ -50,7 +50,9 @@ def grid(*headers: str, right: tuple[str, ...] = ()) -> Table:
         border_style=ACCENT_SOFT,
     )
     for h in headers:
-        table.add_column(h, justify="right" if h in right else "left")
+        table.add_column(
+            h, justify="right" if h in right else "left", no_wrap=True, overflow="ellipsis"
+        )
     return table
 
 
