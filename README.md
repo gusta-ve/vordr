@@ -83,6 +83,10 @@ servidores da conta, sugere o alias SSH de cada um (lendo seu `~/.ssh/config`) e
 pergunta se há um preço fixo a travar — gerando o config sem você escrever TOML. Em
 pipe/CI, ou sem token, escreve um modelo comentado.
 
+Se um servidor não tiver alias SSH (você deixa em branco, ou escreve `ssh = ""`), ele
+entra como **billing-only**: aparece em `cost`/`billing`, mas `status`/`resources`/
+`security` o ignoram (com um aviso), pois não há como contatá-lo.
+
 ```toml
 [thresholds]
 warn_days = 14

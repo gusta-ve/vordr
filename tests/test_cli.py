@@ -237,6 +237,50 @@ def test_cost_hints_when_provider_token_missing(monkeypatch, tmp_path):
     assert "secret set hetzner" in result.stdout
 
 
+def test_init_wizard_no_alias_makes_billing_only(monkeypatch, tmp_path):
+    """Sem alias casado e enter vazio → host 'billing-only' (ssh vazio)."""
+    from datetime import date
+
+    from vordr.providers import ServerBilling
+
+    path = tmp_path / "config.toml"
+    monkeypatch.setenv("VORDR_CONFIG", str(path))
+    _isolate_secrets(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "_is_interactive", lambda: True)
+    monkeypatch.setattr(cli.secrets, "get_token", lambda p: "tok" if p == "hetzner" else None)
+    monkeypatch.setattr(
+        cli.hetzner,
+        "fetch_servers",
+        lambda token, timeout=15: {
+            "ubuntu-nexus": ServerBilling("ubuntu-nexus", date(2026, 5, 1), 6.49, 6.49, "EUR")
+        },
+    )
+    monkeypatch.setattr(cli.ssh, "list_aliases", lambda: [])  # nenhum alias no ssh config
+    # importar(enter) / alias vazio(enter) / preço vazio(enter)
+    result = runner.invoke(cli.app, ["init"], input="\n\n\n")
+    assert result.exit_code == 0
+    text = path.read_text()
+    assert 'ssh = ""' in text                    # billing-only
+    assert 'provider = "Hetzner"' in text
+    # a chave da tabela vem do nome do servidor
+    assert "[hosts.ubuntu-nexus]" in text
+
+
+def test_status_skips_billing_only_host(monkeypatch, tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[hosts.box]\nssh = ""\nlabel = "Box"\n'
+        '  [hosts.box.server]\n  provider = "Vultr"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("VORDR_CONFIG", str(path))
+    monkeypatch.setenv("COLUMNS", "200")
+    _isolate_secrets(monkeypatch, tmp_path)
+    result = runner.invoke(cli.app, ["status"])
+    assert result.exit_code == 0
+    assert "sem alias ssh" in result.stdout.lower()
+
+
 def test_cost_discovers_servers_without_config(monkeypatch, tmp_path):
     """Com token e nenhum host no config, o `cost` lista os servidores da API."""
     from datetime import date

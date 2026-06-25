@@ -116,6 +116,17 @@ def _select_hosts(config: Config, host: str | None) -> list[Host]:
     return list(config.hosts.values())
 
 
+def _require_ssh(selected: list[Host]) -> list[Host]:
+    """Mantém só hosts com alias SSH; avisa sobre os 'billing-only' (sem SSH)."""
+    usable = [h for h in selected if h.ssh.strip()]
+    skipped = [h.display for h in selected if not h.ssh.strip()]
+    if skipped:
+        console.print(
+            f"[dim]sem alias SSH (use `vordr cost`/`billing`): {', '.join(skipped)}[/]"
+        )
+    return usable
+
+
 def _probe_all(hosts: list[Host], fn) -> dict[str, object]:
     """Executa ``fn(host)`` em paralelo (I/O de SSH é o gargalo)."""
     results: dict[str, object] = {}
@@ -222,9 +233,13 @@ def _toml_key(value: str, used: set[str]) -> str:
 
 
 def _render_host_block(key: str, alias: str, provider: str, sb, cost: float | None) -> str:
+    if alias:
+        ssh_line = f'ssh = "{alias}"'
+    else:
+        ssh_line = 'ssh = ""   # sem alias SSH: entra em cost/billing, não em status'
     lines = [
         f"[hosts.{key}]",
-        f'ssh = "{alias}"',
+        ssh_line,
         f'label = "{sb.name}"',
         "",
         f"  [hosts.{key}.server]",
@@ -287,8 +302,17 @@ def _wizard_import() -> list[str]:
         for name, sb in sorted(discovered[prov].items()):
             if not typer.confirm(f"  importar '{name}' ({prov.capitalize()})?", default=True):
                 continue
-            suggestion = _suggest_alias(name, aliases) or name
-            alias = typer.prompt("    alias SSH (p/ status/resources)", default=suggestion).strip()
+            suggestion = _suggest_alias(name, aliases)
+            if suggestion:
+                alias = typer.prompt(
+                    "    alias SSH (p/ status/resources)", default=suggestion
+                ).strip()
+            else:
+                alias = typer.prompt(
+                    "    alias SSH (enter se não houver — entra só em cost/billing)",
+                    default="",
+                    show_default=False,
+                ).strip()
             api_hint = (
                 f"{sb.currency} {sb.cost_gross:.2f}"
                 if sb.cost_gross is not None
@@ -306,7 +330,7 @@ def _wizard_import() -> list[str]:
                 except ValueError:
                     console.print("[yellow]    valor inválido — usando o da API.[/]")
             key = _toml_key(alias or name, used)
-            blocks.append(_render_host_block(key, alias or name, prov.capitalize(), sb, cost))
+            blocks.append(_render_host_block(key, alias, prov.capitalize(), sb, cost))
     return blocks
 
 
@@ -447,7 +471,9 @@ def status(
 ) -> None:
     """Painel de status: estado, uptime, carga, RAM, disco, containers e expiração."""
     config = _load_config()
-    selected = _select_hosts(config, host)
+    selected = _require_ssh(_select_hosts(config, host))
+    if not selected:
+        raise typer.Exit(0)
 
     if raw:
         for h in selected:
@@ -483,7 +509,9 @@ def resources(
 ) -> None:
     """Detalhe de recursos: CPU/load, memória e disco com valores absolutos."""
     config = _load_config()
-    selected = _select_hosts(config, host)
+    selected = _require_ssh(_select_hosts(config, host))
+    if not selected:
+        raise typer.Exit(0)
     metrics = _probe_all(selected, lambda a: probe_system(a, timeout=timeout))
 
     for h in selected:
@@ -539,7 +567,9 @@ def security(
 ) -> None:
     """Auditoria de segurança: logins, falhas, portas, fail2ban e atualizações."""
     config = _load_config()
-    selected = _select_hosts(config, host)
+    selected = _require_ssh(_select_hosts(config, host))
+    if not selected:
+        raise typer.Exit(0)
     metrics = _probe_all(selected, lambda a: probe_security(a, timeout=timeout))
 
     for h in selected:
