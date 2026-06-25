@@ -3,6 +3,14 @@
 All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.9.0]
+
+### Added
+- **`vordr setup`** — a guided, tutorial-style configurator for alerts & notifications.
+  Type a value (or accept the default) and it writes only the `[alerts]`/`[notify]`
+  sections, generates an ntfy topic, can send a test push, and optionally installs a
+  reversible per-user systemd timer. No hand-editing TOML, no copying files.
+
 ## [0.8.1]
 
 ### Added

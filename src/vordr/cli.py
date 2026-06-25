@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import os
+import secrets as pysecrets
+import shutil
+import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, timedelta
+from pathlib import Path
 
 import typer
 from rich.console import Group
@@ -1246,8 +1251,7 @@ def _push_alerts(alerts: list[_Alert], config: Config) -> None:
     if sent:
         console.print(indent(meta(f"pushed to {', '.join(sent)}")))
     else:
-        console.print(indent(meta(
-            "no notify channel — set [notify] ntfy in the config or $VORDR_NTFY_URL")))
+        console.print(indent(meta("no notify channel — run `vordr setup` to configure push")))
 
 
 def _parse_interval(value: str) -> int:
@@ -1340,6 +1344,132 @@ def check(
             console.print(indent(meta(f"next check in {watch}")))
             time.sleep(every)
     raise typer.Exit(1 if _check_once(notify_, timeout) else 0)
+
+
+# --- setup: guided config for alerts & notifications -------------------------
+
+def _strip_table(text: str, name: str) -> str:
+    """Remove a top-level ``[name]`` table (and its body) from TOML text."""
+    out: list[str] = []
+    skip = False
+    for line in text.splitlines():
+        s = line.strip()
+        if s == f"[{name}]":
+            skip = True
+            continue
+        if skip:
+            if s.startswith("["):   # the next table begins — stop skipping, keep it
+                skip = False
+            else:
+                continue            # drop the table's body
+        out.append(line)
+    return "\n".join(out)
+
+
+def _render_section(name: str, values: dict) -> str:
+    lines = [f"[{name}]"]
+    for key, val in values.items():
+        lines.append(f'{key} = "{val}"' if isinstance(val, str) else f"{key} = {val}")
+    return "\n".join(lines)
+
+
+def _upsert_sections(path: Path, sections: dict[str, dict]) -> None:
+    """Insert/replace whole ``[name]`` tables, preserving the rest of the file."""
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    for name in sections:
+        text = _strip_table(text, name)
+    text = text.rstrip("\n")
+    blocks = "\n\n".join(_render_section(n, v) for n, v in sections.items())
+    new = (text + "\n\n" if text.strip() else "") + blocks + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new, encoding="utf-8")
+
+
+def _install_user_timer(vordr_bin: str) -> bool:
+    """Write and enable a per-user systemd timer (reversible; never system-wide)."""
+    base = Path(os.environ.get("XDG_CONFIG_HOME", "~/.config")).expanduser() / "systemd" / "user"
+    base.mkdir(parents=True, exist_ok=True)
+    (base / "vordr-check.service").write_text(
+        "[Unit]\nDescription=vordr check — alerts on charges, runway and offline hosts\n\n"
+        f"[Service]\nType=oneshot\nExecStart={vordr_bin} check --notify\n",
+        encoding="utf-8",
+    )
+    (base / "vordr-check.timer").write_text(
+        "[Unit]\nDescription=Run vordr check daily\n\n"
+        "[Timer]\nOnCalendar=*-*-* 09:00:00\nPersistent=true\n\n"
+        "[Install]\nWantedBy=timers.target\n",
+        encoding="utf-8",
+    )
+    try:
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True, capture_output=True)
+        subprocess.run(["systemctl", "--user", "enable", "--now", "vordr-check.timer"],
+                       check=True, capture_output=True)
+    except (subprocess.CalledProcessError, OSError) as exc:
+        err_console.print(f"[yellow]units written to {base}, but enabling failed:[/] {exc}")
+        return False
+    return True
+
+
+@app.command()
+def setup() -> None:
+    """Guided setup for alerts & notifications — type a value, press enter, done.
+
+    Configures the push channel (ntfy), the alert thresholds and, optionally, a daily
+    per-user timer. It writes only the ``[alerts]`` and ``[notify]`` sections of your
+    config; everything else is left untouched.
+    """
+    if not _is_interactive():
+        err_console.print(
+            "[yellow]setup needs a terminal.[/] Edit [bold][alerts]/[notify][/] in the "
+            "config (see examples/config.example.toml)."
+        )
+        raise typer.Exit(1)
+
+    config = _load_config(require_hosts=False)
+    path = config_path()
+    console.print()
+    console.print(indent(brand("setup")))
+    console.print()
+
+    # 1. push channel (ntfy) — generate a hard-to-guess topic as the default
+    default_topic = config.ntfy or f"https://ntfy.sh/vordr-{pysecrets.token_hex(4)}"
+    console.print(indent(meta("push: install the ntfy app and subscribe to this topic")))
+    ntfy = typer.prompt("  ntfy URL/topic", default=default_topic).strip()
+
+    # 2. thresholds
+    runway = typer.prompt("  warn when a bonus/credit runs out within N days",
+                          default=config.runway_days)
+    charge = typer.prompt("  warn when a charge/renewal/expiry is within N days",
+                          default=config.charge_days)
+
+    _upsert_sections(path, {
+        "alerts": {"runway_days": int(runway), "charge_days": int(charge)},
+        "notify": {"ntfy": ntfy},
+    })
+    console.print(indent(meta(f"saved to {path}")))
+
+    # 3. test push
+    if ntfy and typer.confirm("  send a test notification now?", default=True):
+        try:
+            sent = notify.send("vordr · test",
+                               "setup complete — your alerts will arrive here.", ntfy=ntfy)
+            if sent:
+                console.print(indent(meta(f"sent via {', '.join(sent)} — check your phone")))
+        except notify.NotifyError as exc:
+            err_console.print(f"[red]test failed:[/] {exc}")
+
+    # 4. scheduling — offer the per-user timer, else show the no-setup loop
+    vordr_bin = shutil.which("vordr")
+    if vordr_bin and shutil.which("systemctl") and typer.confirm(
+        "  schedule a daily check? (per-user systemd timer, reversible)", default=False
+    ):
+        if _install_user_timer(vordr_bin):
+            console.print(indent(meta("enabled vordr-check.timer (09:00 daily) — "
+                                      "remove: systemctl --user disable --now vordr-check.timer")))
+    else:
+        console.print(indent(meta("schedule anytime: `vordr check --watch 6h --notify` "
+                                  "(no system changes)")))
+    console.print()
 
 
 def _version_callback(value: bool) -> None:

@@ -138,6 +138,8 @@ vordr cost --offline      # no network: uses only the config
 vordr billing             # balance/credit and next charge per provider
 vordr check               # triage: only what needs attention (for cron)
 vordr check --notify      # ...and push the alerts to your phone (ntfy)
+vordr check --watch 6h    # ...keep it on an interval (no system changes)
+vordr setup               # guided setup for alerts & notifications
 vordr hosts               # lists what's configured
 
 vordr secret set hetzner  # stores the API token (chmod 600, outside the repo)
@@ -189,10 +191,16 @@ non-zero if anything does, so it's made for cron. It flags:
 - an **upcoming charge or renewal**, and an **expiring domain**,
 - a host that's **offline**.
 
+Set it up in one guided command — type a value, press enter, done:
+
 ```bash
+vordr setup            # configures push, thresholds and (optionally) a daily timer
 vordr check            # quiet when all is well; lists alerts + exit 1 otherwise
 vordr check --notify   # also push the alerts to your phone (ntfy)
 ```
+
+`vordr setup` writes only the `[alerts]`/`[notify]` sections of your config (the rest is
+left untouched), generates a hard-to-guess ntfy topic for you, and can send a test push.
 
 ```
   vordr · check

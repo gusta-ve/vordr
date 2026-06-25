@@ -51,6 +51,40 @@ def test_evaluate_server_and_domain_expiry():
     assert "domain expires in 2d" in txt
 
 
+def test_upsert_sections_preserves_rest(tmp_path):
+    import tomllib
+
+    p = tmp_path / "config.toml"
+    p.write_text('[hosts.web]\nssh = "web"\n\n[notify]\nntfy = "old"\n', encoding="utf-8")
+    cli._upsert_sections(p, {
+        "alerts": {"runway_days": 30, "charge_days": 5},
+        "notify": {"ntfy": "https://ntfy.sh/new"},
+    })
+    data = tomllib.loads(p.read_text())
+    assert data["hosts"]["web"]["ssh"] == "web"               # preserved
+    assert data["notify"]["ntfy"] == "https://ntfy.sh/new"    # replaced, not duplicated
+    assert data["alerts"] == {"runway_days": 30, "charge_days": 5}
+
+
+def test_setup_writes_config(monkeypatch, tmp_path):
+    import tomllib
+
+    path = tmp_path / "config.toml"
+    path.write_text('[hosts.web]\nssh = "web"\n', encoding="utf-8")
+    monkeypatch.setenv("VORDR_CONFIG", str(path))
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setattr(cli, "_is_interactive", lambda: True)
+    monkeypatch.setattr(cli.shutil, "which", lambda x: None)   # no systemd branch
+    # ntfy(enter=default) / runway "20" / charge(enter=7) / test push "n"
+    result = runner.invoke(cli.app, ["setup"], input="\n20\n\nn\n")
+    assert result.exit_code == 0
+    data = tomllib.loads(path.read_text())
+    assert data["alerts"]["runway_days"] == 20
+    assert data["alerts"]["charge_days"] == 7
+    assert "ntfy" in data["notify"]
+    assert data["hosts"]["web"]["ssh"] == "web"               # untouched
+
+
 def test_parse_interval():
     assert cli._parse_interval("30m") == 1800
     assert cli._parse_interval("6h") == 21600
