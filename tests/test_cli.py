@@ -237,6 +237,43 @@ def test_cost_hints_when_provider_token_missing(monkeypatch, tmp_path):
     assert "secret set hetzner" in result.stdout
 
 
+def test_cost_discovers_servers_without_config(monkeypatch, tmp_path):
+    """Com token e nenhum host no config, o `cost` lista os servidores da API."""
+    from datetime import date
+
+    from vordr.providers import ServerBilling
+
+    path = tmp_path / "config.toml"
+    path.write_text("[thresholds]\nwarn_days = 14\n", encoding="utf-8")
+    monkeypatch.setenv("VORDR_CONFIG", str(path))
+    monkeypatch.setenv("COLUMNS", "200")
+    _isolate_secrets(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.secrets, "get_token", lambda p: "tok" if p == "hetzner" else None)
+    monkeypatch.setattr(
+        cli.hetzner,
+        "fetch_servers",
+        lambda token, timeout=15: {
+            "ubuntu-nexus": ServerBilling("ubuntu-nexus", date(2026, 5, 1), 6.49, 6.49, "EUR")
+        },
+    )
+    result = runner.invoke(cli.app, ["cost"])
+    assert result.exit_code == 0
+    assert "ubuntu-nexus" in result.stdout      # descoberto pela API
+    assert "6.49" in result.stdout
+
+
+def test_cost_no_config_no_token_hints(monkeypatch, tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[thresholds]\nwarn_days = 14\n", encoding="utf-8")
+    monkeypatch.setenv("VORDR_CONFIG", str(path))
+    monkeypatch.setenv("COLUMNS", "200")
+    _isolate_secrets(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.secrets, "get_token", lambda p: None)
+    result = runner.invoke(cli.app, ["cost"])
+    assert result.exit_code == 0
+    assert "secret set" in result.stdout
+
+
 def test_billing_prepaid_shows_credit_and_runway(monkeypatch, tmp_path):
     from datetime import date
 

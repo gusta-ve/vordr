@@ -15,7 +15,7 @@ from rich.table import Table
 from rich.text import Text
 
 from . import __version__, hetzner, providers, rdap, secrets, ssh, vultr
-from .config import Config, ConfigError, Host, config_path, load
+from .config import Config, ConfigError, Host, Subscription, config_path, load
 from .format import (
     days_left_label,
     days_left_style,
@@ -536,27 +536,101 @@ def _resolve_domain_expiries(
     return resolved
 
 
-def _fetch_provider_servers(
-    hosts: list[Host], *, timeout: int
-) -> tuple[dict[str, dict[str, providers.ServerBilling]], list[str]]:
-    """Lista os servidores na API de cada provedor referenciado. Devolve (dados, avisos)."""
-    servers: dict[str, dict[str, providers.ServerBilling]] = {}
-    notes: list[str] = []
-    referenced = {
+def _referenced_providers(hosts: list[Host]) -> set[str]:
+    """Provedores citados explicitamente pelos hosts do config."""
+    return {
         h.server.provider.lower()
         for h in hosts
         if h.server.provider and h.server.provider.lower() in _PROVIDER_CLIENTS
     }
-    for prov in sorted(referenced):
+
+
+def _api_providers(hosts: list[Host]) -> list[str]:
+    """Provedores a consultar: os referenciados no config + os que têm token salvo."""
+    referenced = _referenced_providers(hosts)
+    with_token = {p for p in _PROVIDER_CLIENTS if secrets.get_token(p)}
+    return sorted(referenced | with_token)
+
+
+def _fetch_provider_servers(
+    hosts: list[Host], *, timeout: int, discover: bool = False
+) -> tuple[dict[str, dict[str, providers.ServerBilling]], list[str]]:
+    """Lista os servidores na API dos provedores. Devolve (dados, avisos).
+
+    Com ``discover=True`` consulta também todo provedor que tenha token salvo (não só
+    os citados no config) — é o que permite achar servidores sem nenhuma entrada no
+    TOML. Sem token, só avisa para os provedores realmente referenciados por um host.
+    """
+    servers: dict[str, dict[str, providers.ServerBilling]] = {}
+    notes: list[str] = []
+    referenced = _referenced_providers(hosts)
+    query = set(referenced)
+    if discover:
+        query |= {p for p in _PROVIDER_CLIENTS if secrets.get_token(p)}
+    for prov in sorted(query):
         token = secrets.get_token(prov)
         if not token:
-            notes.append(f"{prov}: sem token — rode `vordr secret set {prov}` para automatizar")
+            if prov in referenced:
+                notes.append(
+                    f"{prov}: sem token — rode `vordr secret set {prov}` para automatizar"
+                )
             continue
         try:
             servers[prov] = _PROVIDER_CLIENTS[prov].fetch_servers(token, timeout=timeout)
         except providers.ProviderError as exc:
             notes.append(f"{prov}: {exc}")
     return servers, notes
+
+
+def _discovered_host(prov: str, sb: providers.ServerBilling) -> Host:
+    """Host sintético a partir de um servidor achado na API (sem entrada no config).
+
+    Sem ``ssh`` (logo, fora de status/resources/security); custo e ``since`` fluem da
+    API via :func:`_resolve_lifecycle`.
+    """
+    return Host(
+        name=sb.name,
+        ssh="",
+        label=sb.name,
+        server=Subscription(provider=prov.capitalize(), provider_ref=sb.name),
+    )
+
+
+def _assemble_rows(
+    config_hosts: list[Host],
+    servers: dict[str, dict[str, providers.ServerBilling]],
+    dom_exp: dict[str, date | None],
+    today: date,
+    *,
+    discover: bool,
+) -> list[tuple[Host, _Lifecycle]]:
+    """Une hosts do config (enriquecidos pela API) com servidores só achados na API."""
+    rows: list[tuple[Host, _Lifecycle]] = []
+    claimed: set[tuple[str, str]] = set()
+    for h in config_hosts:
+        sb = _match_server(h, servers)
+        if sb is not None and h.server.provider:
+            claimed.add((h.server.provider.lower(), sb.name))
+        rows.append((h, _resolve_lifecycle(h, sb, dom_exp.get(h.name), today)))
+    if discover:
+        for prov in sorted(servers):
+            for name, sb in sorted(servers[prov].items()):
+                if (prov, name) in claimed:
+                    continue
+                host = _discovered_host(prov, sb)
+                rows.append((host, _resolve_lifecycle(host, sb, None, today)))
+    return rows
+
+
+def _find_row(
+    rows: list[tuple[Host, _Lifecycle]], name: str
+) -> tuple[Host, _Lifecycle] | None:
+    """Acha a linha de um host por nome/label/alias SSH (config ou descoberto)."""
+    low = name.lower()
+    for host, lc in rows:
+        if low in {host.name.lower(), (host.label or "").lower(), host.ssh.lower()}:
+            return host, lc
+    return None
 
 
 def _match_server(
@@ -601,7 +675,7 @@ def _age_text(lc: _Lifecycle, today: date) -> str:
 
 
 def _cost_table(
-    hosts: list[Host], config: Config, today: date, lifecycles: dict[str, _Lifecycle]
+    rows: list[tuple[Host, _Lifecycle]], config: Config, today: date
 ) -> Table:
     table = Table(title="Vordr · custo & ciclo de vida", title_style="bold cyan")
     table.add_column("host", style="bold")
@@ -610,8 +684,7 @@ def _cost_table(
     table.add_column("servidor")
     table.add_column("domínio")
     table.add_column("custo/mês", justify="right")
-    for host in hosts:
-        lc = lifecycles[host.name]
+    for host, lc in rows:
         dom = host.domain
         dom_has = dom is not None and (dom.has_data or bool(dom.name))
         table.add_row(
@@ -679,36 +752,48 @@ def cost(
 ) -> None:
     """Custo & ciclo de vida: hospedagem, renovação do servidor e do domínio.
 
-    Os valores do config sempre vencem. O que faltar é buscado automaticamente:
-    custo/``since`` na API do provedor (precisa de token — ``vordr secret set``) e a
-    expiração do domínio via RDAP. Use ``--offline`` para pular a rede.
+    Com um token salvo, **descobre os servidores da conta** automaticamente — o config é
+    opcional. Os valores do config sempre vencem; o que faltar vem da API (custo/``since``)
+    e do RDAP (expiração do domínio). Use ``--offline`` para usar só o config, sem rede.
     """
-    config = _load_config()
-    selected = _select_hosts(config, host)
+    config = _load_config(require_hosts=False)
     today = date.today()
+    config_hosts = list(config.hosts.values())
+    discover = not offline
 
-    servers: dict[str, dict[str, hetzner.ServerBilling]] = {}
+    servers: dict[str, dict[str, providers.ServerBilling]] = {}
     notes: list[str] = []
     accounts: dict[str, providers.AccountBilling] = {}
     if not offline:
-        servers, notes = _fetch_provider_servers(selected, timeout=timeout)
-        accounts, acct_notes = _fetch_provider_accounts(selected, timeout=timeout)
+        servers, notes = _fetch_provider_servers(config_hosts, timeout=timeout, discover=discover)
+        accounts, acct_notes = _fetch_provider_accounts(config_hosts, timeout=timeout)
         notes += acct_notes
-    dom_exp = _resolve_domain_expiries(selected, offline=offline, timeout=timeout)
-    lifecycles = {
-        h.name: _resolve_lifecycle(h, _match_server(h, servers), dom_exp.get(h.name), today)
-        for h in selected
-    }
+    dom_exp = _resolve_domain_expiries(config_hosts, offline=offline, timeout=timeout)
+    rows = _assemble_rows(config_hosts, servers, dom_exp, today, discover=discover)
+
+    if not rows:
+        console.print(
+            "[yellow]Nada para mostrar.[/] Configure um token "
+            "([bold]vordr secret set hetzner|vultr[/]) para descobrir os servidores "
+            "pela API, ou [bold]vordr init[/] para declarar hosts via SSH."
+        )
+        for note in notes:
+            console.print(f"[dim yellow]{note}[/]")
+        raise typer.Exit(0)
 
     if host:
-        console.print(_cost_panel(selected[0], config, today, lifecycles[selected[0].name]))
+        row = _find_row(rows, host)
+        if row is None:
+            known = ", ".join(sorted(h.display for h, _ in rows)) or "(nenhum)"
+            err_console.print(f"[bold red]host '{host}' não encontrado.[/] Conhecidos: {known}")
+            raise typer.Exit(2)
+        console.print(_cost_panel(row[0], config, today, row[1]))
     else:
-        console.print(_cost_table(selected, config, today, lifecycles))
+        console.print(_cost_table(rows, config, today))
 
         totals: dict[str, float] = {}
         missing: list[str] = []
-        for h in selected:
-            lc = lifecycles[h.name]
+        for h, lc in rows:
             for cur, val in _monthly_by_currency(h, lc).items():
                 totals[cur] = round(totals.get(cur, 0.0) + val, 2)
             has_any = (
@@ -729,7 +814,7 @@ def cost(
             )
 
     for prov in sorted(accounts):
-        burn, _cur = _provider_monthly_burn(selected, lifecycles, prov)
+        burn, _cur = _provider_monthly_burn(rows, prov)
         console.print(_billing_summary_line(prov, accounts[prov], burn, today))
 
     for note in notes:
@@ -755,33 +840,28 @@ def _fetch_provider_accounts(
     """Saldo das contas dos provedores referenciados que expõem ``fetch_account``."""
     accounts: dict[str, providers.AccountBilling] = {}
     notes: list[str] = []
-    referenced = {
-        h.server.provider.lower()
-        for h in hosts
-        if h.server.provider and h.server.provider.lower() in _PROVIDER_CLIENTS
-    }
-    for prov in sorted(referenced):
+    for prov in _api_providers(hosts):
         client = _PROVIDER_CLIENTS[prov]
         if not hasattr(client, "fetch_account"):
             continue  # provedor postpago — sem saldo via API
-        if not secrets.get_token(prov):
+        token = secrets.get_token(prov)
+        if not token:
             continue  # token faltando já é avisado pelo fetch de servidores
         try:
-            accounts[prov] = client.fetch_account(secrets.get_token(prov), timeout=timeout)
+            accounts[prov] = client.fetch_account(token, timeout=timeout)
         except providers.ProviderError as exc:
             notes.append(f"{prov}: {exc}")
     return accounts, notes
 
 
 def _provider_monthly_burn(
-    hosts: list[Host], lifecycles: dict[str, _Lifecycle], prov: str
+    rows: list[tuple[Host, _Lifecycle]], prov: str
 ) -> tuple[float | None, str | None]:
     """Soma o custo mensal dos hosts de um provedor (o 'burn' que consome o saldo)."""
     total, currency, found = 0.0, None, False
-    for h in hosts:
-        if (h.server.provider or "").lower() != prov:
+    for host, lc in rows:
+        if (host.server.provider or "").lower() != prov:
             continue
-        lc = lifecycles[h.name]
         if lc.cost is not None:
             total += lc.cost
             currency = lc.currency
@@ -898,37 +978,34 @@ def billing(
     *runway* — quando o saldo esgota e a cobrança no cartão começa. Para postpagos
     (ex.: Hetzner) mostra a próxima data de cobrança e o custo estimado.
     """
-    config = _load_config()
+    config = _load_config(require_hosts=False)
     hosts = list(config.hosts.values())
     today = date.today()
+    discover = not offline
 
     servers: dict[str, dict[str, providers.ServerBilling]] = {}
     notes: list[str] = []
     accounts: dict[str, providers.AccountBilling] = {}
     if not offline:
-        servers, notes = _fetch_provider_servers(hosts, timeout=timeout)
+        servers, notes = _fetch_provider_servers(hosts, timeout=timeout, discover=discover)
         accounts, acct_notes = _fetch_provider_accounts(hosts, timeout=timeout)
         notes += acct_notes
-    lifecycles = {
-        h.name: _resolve_lifecycle(h, _match_server(h, servers), None, today) for h in hosts
-    }
+    rows = _assemble_rows(hosts, servers, {}, today, discover=discover)
 
-    referenced = sorted(
-        {
-            h.server.provider.lower()
-            for h in hosts
-            if h.server.provider and h.server.provider.lower() in _PROVIDER_CLIENTS
-        }
+    providers_seen = sorted(
+        {(h.server.provider or "").lower() for h, _ in rows} & set(_PROVIDER_CLIENTS)
     )
-    if not referenced:
+    if not providers_seen:
         console.print(
-            "[yellow]Nenhum host com provedor de API suportado.[/] "
-            'Defina provider = "Hetzner" ou "Vultr" no config.'
+            "[yellow]Nenhum provedor de API para mostrar.[/] Configure um token "
+            '([bold]vordr secret set hetzner|vultr[/]) ou defina provider = "Hetzner"/"Vultr".'
         )
+        for note in notes:
+            console.print(f"[dim yellow]{note}[/]")
         raise typer.Exit(0)
 
-    for prov in referenced:
-        burn, currency = _provider_monthly_burn(hosts, lifecycles, prov)
+    for prov in providers_seen:
+        burn, currency = _provider_monthly_burn(rows, prov)
         console.print(
             _billing_panel(prov, accounts.get(prov), burn, currency, config, today, offline)
         )

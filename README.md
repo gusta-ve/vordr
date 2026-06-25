@@ -52,15 +52,27 @@ pipx install vordr          # recomendado (ferramenta isolada no PATH)
 pip install -e ".[dev]"
 ```
 
-## Configuração
+## Começo rápido (só com um token)
+
+Para custo e cobrança você **não precisa configurar nada**: dê um token de provedor e
+o Vordr **descobre os servidores da sua conta** sozinho.
+
+```bash
+vordr secret set hetzner   # ou: vordr secret set vultr
+vordr cost                 # lista os servidores da conta, com custo e tempo de uso
+vordr billing              # saldo/crédito e próxima cobrança
+```
+
+O `config.toml` é **opcional** e serve só para o que a API não sabe: um apelido bonito,
+o alias SSH (para `status`/`resources`/`security`) ou um **preço travado** que difere do
+de lista (promoção/legado). O que você escrever no config sempre vence o que vem da API.
+
+## Configuração (opcional)
 
 Os hosts são **aliases do seu `~/.ssh/config`** — nenhum IP, usuário ou chave fica
-guardado pelo Vordr. As datas de cobrança são informadas por você (o servidor não tem
-como saber quando o provedor ou o registrar vão cobrar de novo).
-
-Cada host tem dois blocos opcionais de ciclo de vida: `[hosts.X.server]` (a
-hospedagem) e `[hosts.X.domain]` (o domínio). Ambos com `expires`/`cost`, somados no
-custo mensal.
+guardado pelo Vordr. Cada host tem dois blocos de ciclo de vida: `[hosts.X.server]` (a
+hospedagem) e `[hosts.X.domain]` (o domínio) — ambos com campos **todos opcionais**,
+preenchidos pela API/RDAP quando você os deixa em branco.
 
 ```bash
 vordr init        # cria ~/.config/vordr/config.toml comentado
@@ -93,9 +105,10 @@ label = "Web"
   cycle = "yearly"
 ```
 
-Vordr não embute nenhum host: `vordr init` cria um `config.toml` comentado para você
-preencher com seus aliases. Sem hosts configurados, os comandos apenas orientam a
-rodar `vordr init`.
+Vordr não embute nenhum host. Sem config **e** sem token, os comandos apenas orientam o
+próximo passo (`vordr secret set` ou `vordr init`). Os comandos que dependem de SSH
+(`status`, `resources`, `security`) precisam dos aliases no config; já `cost` e
+`billing` funcionam só com o token.
 
 ## Uso
 
