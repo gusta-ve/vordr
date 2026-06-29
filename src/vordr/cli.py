@@ -721,6 +721,21 @@ def _api_providers(hosts: list[Host]) -> list[str]:
     return sorted(referenced | with_token)
 
 
+def _merge_notes(*lists: list[str]) -> list[str]:
+    """Concatenate note lists, dropping duplicates while keeping first-seen order.
+
+    Both the server and account fetchers can hit the same provider error (e.g. a
+    rejected token), so the raw concatenation repeats it — this collapses it.
+    """
+    seen: set[str] = set()
+    merged: list[str] = []
+    for note in (n for lst in lists for n in lst):
+        if note not in seen:
+            seen.add(note)
+            merged.append(note)
+    return merged
+
+
 def _fetch_provider_servers(
     hosts: list[Host], *, timeout: int, discover: bool = False
 ) -> tuple[dict[str, dict[str, providers.ServerBilling]], list[str]]:
@@ -930,7 +945,7 @@ def cost(
     if not offline:
         servers, notes = _fetch_provider_servers(config_hosts, timeout=timeout, discover=discover)
         accounts, acct_notes = _fetch_provider_accounts(config_hosts, timeout=timeout)
-        notes += acct_notes
+        notes = _merge_notes(notes, acct_notes)
     dom_exp = _resolve_domain_expiries(config_hosts, offline=offline, timeout=timeout)
     rows = _assemble_rows(config_hosts, servers, dom_exp, today, discover=discover)
 
@@ -1154,7 +1169,7 @@ def billing(
     if not offline:
         servers, notes = _fetch_provider_servers(hosts, timeout=timeout, discover=discover)
         accounts, acct_notes = _fetch_provider_accounts(hosts, timeout=timeout)
-        notes += acct_notes
+        notes = _merge_notes(notes, acct_notes)
     rows = _assemble_rows(hosts, servers, {}, today, discover=discover)
 
     providers_seen = sorted(
@@ -1274,7 +1289,7 @@ def _check_once(notify_: bool, timeout: int) -> int:
 
     servers, notes = _fetch_provider_servers(config_hosts, timeout=timeout, discover=True)
     accounts, acct_notes = _fetch_provider_accounts(config_hosts, timeout=timeout)
-    notes += acct_notes
+    notes = _merge_notes(notes, acct_notes)
     dom_exp = _resolve_domain_expiries(config_hosts, offline=False, timeout=timeout)
     rows = _assemble_rows(config_hosts, servers, dom_exp, today, discover=True)
 

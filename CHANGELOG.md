@@ -3,6 +3,13 @@
 All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.9.1]
+
+### Fixed
+- A provider error (e.g. a rejected token) was printed twice in `cost`, `billing` and
+  `check`, because both the server and account fetchers reported it. Notes are now
+  deduplicated, keeping first-seen order.
+
 ## [0.9.0]
 
 ### Added

@@ -85,6 +85,15 @@ def test_setup_writes_config(monkeypatch, tmp_path):
     assert data["hosts"]["web"]["ssh"] == "web"               # untouched
 
 
+def test_merge_notes_dedups_preserving_order():
+    # the server and account fetchers both report the same provider error
+    merged = cli._merge_notes(
+        ["vultr: HTTP 401", "hetzner: no token"],
+        ["vultr: HTTP 401"],
+    )
+    assert merged == ["vultr: HTTP 401", "hetzner: no token"]
+
+
 def test_parse_interval():
     assert cli._parse_interval("30m") == 1800
     assert cli._parse_interval("6h") == 21600
