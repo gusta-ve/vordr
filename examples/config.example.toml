@@ -16,10 +16,14 @@ critical_days = 7    # red when this many days or fewer remain
 runway_days = 14     # warn when a prepaid bonus/credit runs out within N days
 charge_days = 7      # warn when a charge/renewal/expiry is within N days
 
-# Push channel for `vordr check --notify` (optional). ntfy.sh needs no account —
-# just pick a hard-to-guess topic. Overridable with the VORDR_NTFY_URL env var.
+# Notification channel(s) for `vordr check --notify` (optional). Pick what you already
+# use — `vordr setup` configures either for you. You can set both.
 [notify]
-ntfy = "https://ntfy.sh/vordr-change-this-topic"
+# Telegram: create a bot with @BotFather, then `vordr secret set telegram` (token stays
+# in secrets.toml, chmod 600). Only the chat id lives here — it isn't a secret.
+# telegram_chat = "123456789"
+# ntfy: no account, just a hard-to-guess topic. Overridable with VORDR_NTFY_URL.
+# ntfy = "https://ntfy.sh/vordr-change-this-topic"
 
 # A fully-specified host (every field set by hand).
 [hosts.web]

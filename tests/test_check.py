@@ -75,8 +75,8 @@ def test_setup_writes_config(monkeypatch, tmp_path):
     monkeypatch.setenv("COLUMNS", "200")
     monkeypatch.setattr(cli, "_is_interactive", lambda: True)
     monkeypatch.setattr(cli.shutil, "which", lambda x: None)   # no systemd branch
-    # ntfy(enter=default) / runway "20" / charge(enter=7) / test push "n"
-    result = runner.invoke(cli.app, ["setup"], input="\n20\n\nn\n")
+    # channel "ntfy" / topic(enter=default) / runway "20" / charge(enter=7) / test push "n"
+    result = runner.invoke(cli.app, ["setup"], input="ntfy\n\n20\n\nn\n")
     assert result.exit_code == 0
     data = tomllib.loads(path.read_text())
     assert data["alerts"]["runway_days"] == 20
@@ -228,6 +228,34 @@ def test_check_notify_dedups_repeat(monkeypatch, tmp_path):
     assert r1.exit_code == 1 and r2.exit_code == 1
     assert len(sent) == 1                                  # pushed once, deduped the repeat
     assert "no change since last push" in r2.stdout.lower()
+
+
+def test_check_notify_routes_to_telegram(monkeypatch, tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[hosts.box]\nssh = ""\n  [hosts.box.server]\n'
+        '  provider = "Hetzner"\n  expires = "2000-01-01"\n'
+        '[notify]\ntelegram_chat = "555"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("VORDR_CONFIG", str(path))
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setenv("VORDR_NOTIFY_STATE", str(tmp_path / "state.json"))
+    monkeypatch.setenv("VORDR_SECRETS", str(tmp_path / "secrets.toml"))
+    monkeypatch.delenv("HCLOUD_TOKEN", raising=False)
+    monkeypatch.delenv("VULTR_API_KEY", raising=False)
+    monkeypatch.setenv("VORDR_TELEGRAM_TOKEN", "123:ABC")   # token via env
+    monkeypatch.setattr(cli, "_resolve_domain_expiries", lambda *a, **k: {})
+    captured = {}
+
+    def fake_send(title, body, *, ntfy=None, telegram=None, critical=False, timeout=10):
+        captured["telegram"] = telegram
+        return ["telegram"] if telegram else []
+
+    monkeypatch.setattr(cli.notify, "send", fake_send)
+    result = runner.invoke(cli.app, ["check", "--notify"])
+    assert result.exit_code == 1
+    assert captured["telegram"] == ("123:ABC", "555")   # token + chat passed through
 
 
 def test_recovered_offline_only_for_offline_keys():

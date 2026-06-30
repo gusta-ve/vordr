@@ -1,4 +1,7 @@
+import json
 import urllib.request
+
+import pytest
 
 from vordr import notify
 
@@ -49,3 +52,62 @@ def test_send_posts_to_ntfy(monkeypatch):
 
 def test_send_no_channel_configured():
     assert notify.send("t", "b", ntfy=None) == []
+
+
+class _JsonResp:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self):
+        return json.dumps(self._payload).encode("utf-8")
+
+
+def test_telegram_validate_ok(monkeypatch):
+    monkeypatch.setattr(
+        urllib.request, "urlopen",
+        lambda url, timeout=10: _JsonResp({"ok": True, "result": {"username": "gusta_vordr_bot"}}),
+    )
+    assert notify.telegram_validate("123:ABC") == "gusta_vordr_bot"
+
+
+def test_telegram_validate_rejected(monkeypatch):
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda url, timeout=10: _JsonResp({"ok": False}))
+    with pytest.raises(notify.NotifyError):
+        notify.telegram_validate("bad")
+
+
+def test_telegram_chat_id_takes_latest(monkeypatch):
+    payload = {"ok": True, "result": [
+        {"message": {"chat": {"id": 111}}},
+        {"message": {"chat": {"id": 222}}},
+    ]}
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout=10: _JsonResp(payload))
+    assert notify.telegram_chat_id("t") == "222"
+
+
+def test_send_posts_to_telegram(monkeypatch):
+    seen = {}
+
+    def fake_urlopen(req, timeout=10):
+        seen["url"] = req.full_url
+        seen["body"] = req.data
+        return _FakeResp()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    sent = notify.send("vordr · 1 update", "! web: offline", telegram=("123:ABC", "555"))
+    assert sent == ["telegram"]
+    assert "api.telegram.org" in seen["url"]
+    assert b"chat_id=555" in seen["body"]
+    assert b"offline" in seen["body"]
+
+
+def test_send_telegram_skipped_when_incomplete():
+    assert notify.send("t", "b", telegram=(None, "555")) == []   # no token
+    assert notify.send("t", "b", telegram=("123", None)) == []   # no chat

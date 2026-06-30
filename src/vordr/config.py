@@ -90,6 +90,7 @@ class Config:
     runway_days: int = 14     # warn when prepaid credit runs out within N days
     charge_days: int = 7      # warn when a charge/renewal/expiry is within N days
     ntfy: str | None = None   # ntfy URL/topic for `vordr check --notify`
+    telegram_chat: str | None = None   # Telegram chat id (token lives in secrets)
     source: Path | None = None
 
     def host(self, name: str) -> Host:
@@ -180,6 +181,7 @@ def parse(data: dict, *, source: Path | None = None) -> Config:
         runway_days=int(alerts.get("runway_days", 14)),
         charge_days=int(alerts.get("charge_days", 7)),
         ntfy=notify.get("ntfy") or None,
+        telegram_chat=str(notify["telegram_chat"]) if notify.get("telegram_chat") else None,
         source=source,
     )
 

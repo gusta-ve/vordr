@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.11.0]
+
+### Added
+- **Telegram notifications.** Deliver alerts through an app you already use instead of a
+  dedicated push app. Store the bot token with `vordr secret set telegram` and the chat id
+  in `[notify] telegram_chat`; `vordr setup` now asks which channel you want and, for
+  Telegram, auto-detects the chat id from a message you send the bot. ntfy still works, and
+  both can run at once.
+
 ## [0.10.0]
 
 ### Changed

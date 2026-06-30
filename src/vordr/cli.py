@@ -365,13 +365,22 @@ def _store_token_flow(provider: str) -> bool:
     if not token:
         err_console.print("[red]empty token.[/]")
         return False
-    client = _PROVIDER_CLIENTS.get(provider)
-    if client is not None:  # validate with a read before storing
+    if provider == "telegram":  # validate the bot token with a getMe read
         try:
-            client.fetch_servers(token, timeout=15)
-        except providers.ProviderError as exc:
+            username = notify.telegram_validate(token, timeout=15)
+        except notify.NotifyError as exc:
             err_console.print(f"[red]token rejected:[/] {exc}")
             return False
+        if username:
+            console.print(f"[green]✔[/] bot [bold]@{username}[/] reached")
+    else:
+        client = _PROVIDER_CLIENTS.get(provider)
+        if client is not None:  # validate with a read before storing
+            try:
+                client.fetch_servers(token, timeout=15)
+            except providers.ProviderError as exc:
+                err_console.print(f"[red]token rejected:[/] {exc}")
+                return False
     path = secrets.set_token(provider, token)
     console.print(f"[green]✔[/] [bold]{provider}[/] token saved to [bold]{path}[/] (chmod 600)")
     return True
@@ -1282,11 +1291,20 @@ def _push_mark(a: _Alert) -> str:
     return "!" if a.crit else "-"
 
 
+def _telegram_creds(config: Config) -> tuple[str | None, str | None] | None:
+    """(token, chat) for Telegram if both are configured, else None."""
+    token = secrets.get_token("telegram")
+    if token and config.telegram_chat:
+        return (token, config.telegram_chat)
+    return None
+
+
 def _push_alerts(alerts: list[_Alert], config: Config) -> None:
     title = f"vordr · {len(alerts)} update(s)"
     body = "\n".join(f"{_push_mark(a)} {a.who}: {a.text}" for a in alerts)
     try:
-        sent = notify.send(title, body, ntfy=config.ntfy, critical=any(a.crit for a in alerts))
+        sent = notify.send(title, body, ntfy=config.ntfy, telegram=_telegram_creds(config),
+                           critical=any(a.crit for a in alerts))
     except notify.NotifyError as exc:
         err_console.print(f"[red]notify failed:[/] {exc}")
         return
@@ -1557,13 +1575,39 @@ def _install_user_timer(vordr_bin: str) -> bool:
     return True
 
 
+def _setup_ntfy_channel(config: Config) -> dict:
+    """Ask for an ntfy topic (generating a hard-to-guess default)."""
+    default_topic = config.ntfy or f"https://ntfy.sh/vordr-{pysecrets.token_hex(4)}"
+    console.print(indent(meta("ntfy: install the ntfy app and subscribe to this topic")))
+    return {"ntfy": typer.prompt("  ntfy URL/topic", default=default_topic).strip()}
+
+
+def _setup_telegram_channel() -> dict:
+    """Store the bot token, then auto-detect the chat id from a message to the bot."""
+    console.print(indent(meta("create a bot: open @BotFather → /newbot → copy the token")))
+    if not _store_token_flow("telegram"):
+        raise typer.Exit(1)
+    token = secrets.get_token("telegram")
+    typer.prompt("  now send any message to your bot, then press enter here",
+                 default="", show_default=False)
+    chat: str | None = None
+    try:
+        chat = notify.telegram_chat_id(token, timeout=15)
+    except notify.NotifyError as exc:
+        err_console.print(f"[yellow]{exc}[/]")
+    if not chat:
+        chat = typer.prompt("  couldn't detect it — paste your chat id").strip()
+    console.print(indent(meta(f"linked chat {chat}")))
+    return {"telegram_chat": chat}
+
+
 @app.command()
 def setup() -> None:
     """Guided setup for alerts & notifications — type a value, press enter, done.
 
-    Configures the push channel (ntfy), the alert thresholds and, optionally, a daily
-    per-user timer. It writes only the ``[alerts]`` and ``[notify]`` sections of your
-    config; everything else is left untouched.
+    Configures the push channel (Telegram or ntfy), the alert thresholds and, optionally,
+    a daily per-user timer. It writes only the ``[alerts]`` and ``[notify]`` sections of
+    your config; everything else is left untouched.
     """
     if not _is_interactive():
         err_console.print(
@@ -1578,10 +1622,11 @@ def setup() -> None:
     console.print(indent(brand("setup")))
     console.print()
 
-    # 1. push channel (ntfy) — generate a hard-to-guess topic as the default
-    default_topic = config.ntfy or f"https://ntfy.sh/vordr-{pysecrets.token_hex(4)}"
-    console.print(indent(meta("push: install the ntfy app and subscribe to this topic")))
-    ntfy = typer.prompt("  ntfy URL/topic", default=default_topic).strip()
+    # 1. channel — Telegram (an app you already use) or ntfy
+    console.print(indent(meta("where should alerts go?  telegram = an app you already use")))
+    channel = typer.prompt("  channel [telegram/ntfy]", default="telegram").strip().lower()
+    notify_section = (_setup_telegram_channel() if channel.startswith("t")
+                      else _setup_ntfy_channel(config))
 
     # 2. thresholds
     runway = typer.prompt("  warn when a bonus/credit runs out within N days",
@@ -1591,17 +1636,19 @@ def setup() -> None:
 
     _upsert_sections(path, {
         "alerts": {"runway_days": int(runway), "charge_days": int(charge)},
-        "notify": {"ntfy": ntfy},
+        "notify": notify_section,
     })
     console.print(indent(meta(f"saved to {path}")))
 
-    # 3. test push
-    if ntfy and typer.confirm("  send a test notification now?", default=True):
+    # 3. test push — through whatever channel we just configured
+    cfg = _load_config(require_hosts=False)
+    telegram = _telegram_creds(cfg)
+    if (cfg.ntfy or telegram) and typer.confirm("  send a test notification now?", default=True):
         try:
-            sent = notify.send("vordr · test",
-                               "setup complete — your alerts will arrive here.", ntfy=ntfy)
+            sent = notify.send("vordr · test", "setup complete — your alerts will arrive here.",
+                               ntfy=cfg.ntfy, telegram=telegram)
             if sent:
-                console.print(indent(meta(f"sent via {', '.join(sent)} — check your phone")))
+                console.print(indent(meta(f"sent via {', '.join(sent)} — check your device")))
         except notify.NotifyError as exc:
             err_console.print(f"[red]test failed:[/] {exc}")
 

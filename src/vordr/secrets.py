@@ -16,6 +16,7 @@ from pathlib import Path
 ENV_VARS = {
     "hetzner": "HCLOUD_TOKEN",
     "vultr": "VULTR_API_KEY",
+    "telegram": "VORDR_TELEGRAM_TOKEN",   # notify channel, not a cloud provider
 }
 
 

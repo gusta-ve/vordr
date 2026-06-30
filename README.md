@@ -194,13 +194,13 @@ non-zero if anything does, so it's made for cron. It flags:
 Set it up in one guided command — type a value, press enter, done:
 
 ```bash
-vordr setup            # configures push, thresholds and (optionally) a daily timer
+vordr setup            # pick a channel, set thresholds, (optionally) a daily timer
 vordr check            # quiet when all is well; lists alerts + exit 1 otherwise
-vordr check --notify   # also push the alerts to your phone (ntfy)
+vordr check --notify   # also push the alerts to your phone
 ```
 
-`vordr setup` writes only the `[alerts]`/`[notify]` sections of your config (the rest is
-left untouched), generates a hard-to-guess ntfy topic for you, and can send a test push.
+`vordr setup` asks **where alerts should go** and writes only the `[alerts]`/`[notify]`
+sections of your config (the rest is left untouched), then can send a test push.
 
 ```
   vordr · check
@@ -212,8 +212,14 @@ left untouched), generates a hard-to-guess ntfy topic for you, and can send a te
 ```
 
 Thresholds live in `[alerts]` (`runway_days`, default 14; `charge_days`, default 7).
-With `--notify`, alerts are pushed via **ntfy** — no account, just a topic; set
-`[notify] ntfy = "https://ntfy.sh/<topic>"` (or `VORDR_NTFY_URL`).
+Two notification channels ship — pick what you already use (or both):
+
+- **Telegram** — delivery through an app you already have, no extra install. Create a bot
+  with [@BotFather](https://t.me/BotFather) (`/newbot`), then `vordr secret set telegram`
+  (the token is stored chmod 600, outside the repo). `vordr setup` auto-detects the chat id
+  from a message you send the bot and writes `[notify] telegram_chat`.
+- **ntfy** — no account, just a topic; set `[notify] ntfy = "https://ntfy.sh/<topic>"`
+  (or `VORDR_NTFY_URL`). Needs the ntfy app (or a browser tab) subscribed to the topic.
 
 ### Push only when it changes (no alarm fatigue)
 

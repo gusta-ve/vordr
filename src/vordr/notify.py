@@ -1,8 +1,11 @@
 """Push notifications for `vordr check --notify`.
 
-The first (and simplest) channel is **ntfy** (https://ntfy.sh): no account, just a
-topic URL — `vordr` POSTs the alert body to it and it lands on your phone. Configure it
-with ``[notify] ntfy = "https://ntfy.sh/<your-topic>"`` (or ``VORDR_NTFY_URL``).
+Two channels ship today:
+
+- **Telegram** — for delivery through an app you already use. Configure the bot token as
+  a secret (``vordr secret set telegram``) and the chat id in ``[notify] telegram_chat``.
+- **ntfy** (https://ntfy.sh) — no account, just a topic URL. Configure with
+  ``[notify] ntfy = "https://ntfy.sh/<your-topic>"`` (or ``VORDR_NTFY_URL``).
 
 The dispatcher is intentionally small and pluggable: add a channel by writing one
 ``_send_<name>`` helper and wiring it into :func:`send`.
@@ -10,11 +13,14 @@ The dispatcher is intentionally small and pluggable: add a channel by writing on
 
 from __future__ import annotations
 
+import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 
 DEFAULT_TIMEOUT = 10
+_TG_API = "https://api.telegram.org/bot{token}/{method}"
 
 
 class NotifyError(RuntimeError):
@@ -52,11 +58,60 @@ def _send_ntfy(url: str, title: str, body: str, *, timeout: int, priority: str) 
         raise NotifyError(f"ntfy: {exc}") from exc
 
 
+def _tg_get(token: str, method: str, *, timeout: int) -> dict:
+    """Call a Telegram Bot API method (GET) and return the decoded JSON payload."""
+    url = _TG_API.format(token=urllib.parse.quote(token, safe=""), method=method)
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 (fixed host)
+            return json.loads(resp.read())
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        raise NotifyError(f"telegram: {exc}") from exc
+
+
+def telegram_validate(token: str, *, timeout: int = DEFAULT_TIMEOUT) -> str:
+    """Return the bot's ``@username`` if the token is valid, else raise NotifyError."""
+    data = _tg_get(token, "getMe", timeout=timeout)
+    if not data.get("ok"):
+        raise NotifyError("telegram: token rejected")
+    return data.get("result", {}).get("username", "")
+
+
+def telegram_chat_id(token: str, *, timeout: int = DEFAULT_TIMEOUT) -> str | None:
+    """The most-recent chat id that has messaged the bot (via getUpdates), or None.
+
+    This is how setup auto-detects where to send: the user messages their bot once,
+    and the chat id falls out of the latest update — no manual id hunting.
+    """
+    data = _tg_get(token, "getUpdates", timeout=timeout)
+    if not data.get("ok"):
+        return None
+    for upd in reversed(data.get("result", [])):
+        msg = upd.get("message") or upd.get("edited_message") or {}
+        chat = msg.get("chat") or {}
+        if chat.get("id") is not None:
+            return str(chat["id"])
+    return None
+
+
+def _send_telegram(token: str, chat_id: str, title: str, body: str, *, timeout: int) -> None:
+    text = f"{title}\n\n{body}" if body else title
+    payload = urllib.parse.urlencode({"chat_id": chat_id, "text": text}).encode("utf-8")
+    url = _TG_API.format(token=urllib.parse.quote(token, safe=""), method="sendMessage")
+    req = urllib.request.Request(url, data=payload, method="POST",
+                                 headers={"User-Agent": "vordr"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (fixed host)
+            resp.read()
+    except (urllib.error.URLError, OSError) as exc:
+        raise NotifyError(f"telegram: {exc}") from exc
+
+
 def send(
     title: str,
     body: str,
     *,
-    ntfy: str | None,
+    ntfy: str | None = None,
+    telegram: tuple[str | None, str | None] | None = None,
     critical: bool = False,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> list[str]:
@@ -70,4 +125,9 @@ def send(
     if url:
         _send_ntfy(url, title, body, timeout=timeout, priority="high" if critical else "default")
         sent.append("ntfy")
+    if telegram:
+        token, chat = telegram
+        if token and chat:
+            _send_telegram(token, chat, title, body, timeout=timeout)
+            sent.append("telegram")
     return sent
