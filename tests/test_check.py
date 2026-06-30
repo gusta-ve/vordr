@@ -83,6 +83,26 @@ def test_setup_writes_config(monkeypatch, tmp_path):
     assert data["alerts"]["charge_days"] == 7
     assert "ntfy" in data["notify"]
     assert data["hosts"]["web"]["ssh"] == "web"               # untouched
+    # no systemd here -> nothing scheduled -> the loud warning must show
+    assert "nothing is scheduled" in result.stdout.lower()
+
+
+def test_setup_schedules_by_default(monkeypatch, tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[hosts.web]\nssh = "web"\n', encoding="utf-8")
+    monkeypatch.setenv("VORDR_CONFIG", str(path))
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setattr(cli, "_is_interactive", lambda: True)
+    monkeypatch.setattr(cli.shutil, "which", lambda x: f"/usr/bin/{x}")   # systemd present
+    installed = {}
+    monkeypatch.setattr(cli, "_install_user_timer",
+                        lambda b: installed.setdefault("done", True))
+    # channel ntfy / topic / runway / charge / test push 'n' / schedule (enter = default YES)
+    result = runner.invoke(cli.app, ["setup"], input="ntfy\n\n\n\nn\n\n")
+    assert result.exit_code == 0
+    assert installed.get("done") is True                      # enter alone scheduled it
+    assert "enabled vordr-check.timer" in result.stdout
+    assert "nothing is scheduled" not in result.stdout.lower()
 
 
 def test_merge_notes_dedups_preserving_order():

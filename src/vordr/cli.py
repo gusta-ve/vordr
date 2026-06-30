@@ -1575,6 +1575,16 @@ def _install_user_timer(vordr_bin: str) -> bool:
     return True
 
 
+def _warn_not_scheduled() -> None:
+    """Make the consequence of an unscheduled setup impossible to miss."""
+    console.print()
+    console.print(indent(Text(
+        "⚠ nothing is scheduled — alerts only fire when `vordr check` runs.", style="yellow")))
+    console.print(indent(meta(
+        "cover yourself: vordr check --watch 6h --notify   (foreground; run in tmux/screen)")))
+    console.print(indent(meta("or re-run `vordr setup` and accept the daily timer")))
+
+
 def _setup_ntfy_channel(config: Config) -> dict:
     """Ask for an ntfy topic (generating a hard-to-guess default)."""
     default_topic = config.ntfy or f"https://ntfy.sh/vordr-{pysecrets.token_hex(4)}"
@@ -1652,17 +1662,21 @@ def setup() -> None:
         except notify.NotifyError as exc:
             err_console.print(f"[red]test failed:[/] {exc}")
 
-    # 4. scheduling — offer the per-user timer, else show the no-setup loop
+    # 4. scheduling — without this nothing runs `check`, so nothing ever alerts.
+    # Default to YES (the timer is per-user and reversible) so accepting the prompt is
+    # enough to be covered; warn loudly if it ends up unscheduled anyway.
     vordr_bin = shutil.which("vordr")
-    if vordr_bin and shutil.which("systemctl") and typer.confirm(
-        "  schedule a daily check? (per-user systemd timer, reversible)", default=False
-    ):
-        if _install_user_timer(vordr_bin):
-            console.print(indent(meta("enabled vordr-check.timer (09:00 daily) — "
-                                      "remove: systemctl --user disable --now vordr-check.timer")))
-    else:
-        console.print(indent(meta("schedule anytime: `vordr check --watch 6h --notify` "
-                                  "(no system changes)")))
+    scheduled = False
+    if vordr_bin and shutil.which("systemctl"):
+        if typer.confirm("  schedule a daily check? (per-user systemd timer, reversible)",
+                         default=True):
+            scheduled = _install_user_timer(vordr_bin)
+            if scheduled:
+                rm = "systemctl --user disable --now vordr-check.timer"
+                console.print(indent(meta(
+                    f"enabled vordr-check.timer (09:00 daily) — remove: {rm}")))
+    if not scheduled:
+        _warn_not_scheduled()
     console.print()
 
 

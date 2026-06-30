@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.11.1]
+
+### Changed
+- **`vordr setup` schedules by default.** The daily-check prompt now defaults to *yes* (the
+  timer is per-user and reversible), so accepting it is enough to be covered. If setup ends
+  with nothing scheduled — you decline, or there's no systemd — it prints a clear warning
+  that no alert will fire until `vordr check` runs, with the commands to fix it. Closes the
+  trap where finishing setup left you feeling protected while nothing actually ran.
+
 ## [0.11.0]
 
 ### Added
