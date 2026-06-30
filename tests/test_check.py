@@ -1,5 +1,6 @@
 from datetime import date
 
+import pytest
 from typer.testing import CliRunner
 
 from vordr import cli
@@ -75,8 +76,8 @@ def test_setup_writes_config(monkeypatch, tmp_path):
     monkeypatch.setenv("COLUMNS", "200")
     monkeypatch.setattr(cli, "_is_interactive", lambda: True)
     monkeypatch.setattr(cli.shutil, "which", lambda x: None)   # no systemd branch
-    # channel "ntfy" / topic(enter=default) / runway "20" / charge(enter=7) / test push "n"
-    result = runner.invoke(cli.app, ["setup"], input="ntfy\n\n20\n\nn\n")
+    # channel "ntfy" (new) / topic(enter=default) / runway "20" / charge(enter=7)
+    result = runner.invoke(cli.app, ["setup"], input="ntfy\n\n20\n\n")
     assert result.exit_code == 0
     data = tomllib.loads(path.read_text())
     assert data["alerts"]["runway_days"] == 20
@@ -97,12 +98,78 @@ def test_setup_schedules_by_default(monkeypatch, tmp_path):
     installed = {}
     monkeypatch.setattr(cli, "_install_user_timer",
                         lambda b: installed.setdefault("done", True))
-    # channel ntfy / topic / runway / charge / test push 'n' / schedule (enter = default YES)
-    result = runner.invoke(cli.app, ["setup"], input="ntfy\n\n\n\nn\n\n")
+    # channel ntfy (new) / topic / runway / charge / schedule (enter = default YES)
+    result = runner.invoke(cli.app, ["setup"], input="ntfy\n\n\n\n\n")
     assert result.exit_code == 0
     assert installed.get("done") is True                      # enter alone scheduled it
     assert "enabled vordr-check.timer" in result.stdout
     assert "nothing is scheduled" not in result.stdout.lower()
+
+
+def test_setup_test_existing_channel_skips_token_reentry(monkeypatch, tmp_path):
+    # naming an already-configured channel offers a test of it — never asks for the token again
+    path = tmp_path / "config.toml"
+    path.write_text('[hosts.web]\nssh = "web"\n[notify]\ntelegram_chat = "555"\n',
+                    encoding="utf-8")
+    monkeypatch.setenv("VORDR_CONFIG", str(path))
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setattr(cli, "_is_interactive", lambda: True)
+    monkeypatch.setattr(cli.shutil, "which", lambda x: None)   # no systemd branch
+    monkeypatch.setattr(cli.secrets, "get_token",
+                        lambda p: "123:ABC" if p == "telegram" else None)
+    sent = {}
+
+    def fake_send(title, body, **k):
+        sent["title"] = title
+        return ["telegram"]
+
+    monkeypatch.setattr(cli.notify, "send", fake_send)
+    # pick "telegram" (already set) / "send it a test?" enter(=yes) / runway / charge
+    result = runner.invoke(cli.app, ["setup"], input="telegram\n\n\n\n")
+    assert result.exit_code == 0
+    assert "already configured: telegram" in result.stdout
+    assert "API token" not in result.stdout                     # never re-asked the token
+    assert sent.get("title") == "🐺 vordr · test notification"  # tested the kept creds
+
+
+def test_setup_keep_leaves_channels_untouched(monkeypatch, tmp_path):
+    # enter alone keeps everything and does NOT push anything
+    path = tmp_path / "config.toml"
+    path.write_text('[hosts.web]\nssh = "web"\n[notify]\ntelegram_chat = "555"\n',
+                    encoding="utf-8")
+    monkeypatch.setenv("VORDR_CONFIG", str(path))
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setattr(cli, "_is_interactive", lambda: True)
+    monkeypatch.setattr(cli.shutil, "which", lambda x: None)
+    monkeypatch.setattr(cli.secrets, "get_token",
+                        lambda p: "123:ABC" if p == "telegram" else None)
+    monkeypatch.setattr(cli.notify, "send",
+                        lambda *a, **k: pytest.fail("keep must not push"))
+    # enter=keep / runway / charge
+    result = runner.invoke(cli.app, ["setup"], input="\n\n\n")
+    assert result.exit_code == 0
+    assert "vordr test" in result.stdout       # points at the dedicated test command
+
+
+def test_test_command_pushes_sample(monkeypatch, tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[notify]\ntelegram_chat = "555"\n', encoding="utf-8")
+    monkeypatch.setenv("VORDR_CONFIG", str(path))
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setattr(cli.secrets, "get_token",
+                        lambda p: "123:ABC" if p == "telegram" else None)
+    captured = {}
+
+    def fake_send(title, body, **k):
+        captured["title"], captured["body"] = title, body
+        return ["telegram"]
+
+    monkeypatch.setattr(cli.notify, "send", fake_send)
+    result = runner.invoke(cli.app, ["test"])
+    assert result.exit_code == 0
+    assert captured["title"] == "🐺 vordr · test notification"
+    # the body shows the real layout — a colored dot per item
+    assert "🔴" in captured["body"] and "🟡" in captured["body"] and "🟢" in captured["body"]
 
 
 def test_merge_notes_dedups_preserving_order():
@@ -310,12 +377,12 @@ def test_check_notify_fires_telegram_and_email_together(monkeypatch, tmp_path):
 
 
 def test_recovered_offline_only_for_offline_keys():
-    state = {"nexus:offline": 3, "hetzner:charge": 1}
-    rec = cli._recovered_offline([], state, {"nexus": "Nexus"})
-    assert [(a.who, a.text, a.tier) for a in rec] == [("Nexus", "back online", 0)]
+    state = {"web:offline": 3, "hetzner:charge": 1}
+    rec = cli._recovered_offline([], state, {"web": "Web"})
+    assert [(a.who, a.text, a.tier) for a in rec] == [("Web", "back online", 0)]
     # a charge clearing is NOT a recovery; an offline that still stands is NOT either
-    still = cli._Alert(True, "Nexus", "offline (unreachable)", key="nexus:offline", tier=3)
-    assert cli._recovered_offline([still], state, {"nexus": "Nexus"}) == []
+    still = cli._Alert(True, "Web", "offline (unreachable)", key="web:offline", tier=3)
+    assert cli._recovered_offline([still], state, {"web": "Web"}) == []
 
 
 def test_check_notify_offline_then_recovery(monkeypatch, tmp_path):

@@ -5,4 +5,4 @@ death, watching without rest. Here it stands guard over your servers: it watches
 status, resources, billing deadlines and signs of compromise.
 """
 
-__version__ = "0.12.0"
+__version__ = "1.0.0"

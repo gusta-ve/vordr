@@ -199,25 +199,25 @@ def test_cost_autofills_from_vultr(monkeypatch, tmp_path):
 
     path = tmp_path / "config.toml"
     path.write_text(
-        '[hosts.simplimei]\nssh = "simplimei"\nlabel = "SimpliMei"\n'
-        '  [hosts.simplimei.server]\n  provider = "Vultr"\n',
+        '[hosts.app]\nssh = "app"\nlabel = "App"\n'
+        '  [hosts.app.server]\n  provider = "Vultr"\n',
         encoding="utf-8",
     )
     monkeypatch.setenv("VORDR_CONFIG", str(path))
     monkeypatch.setenv("COLUMNS", "200")
     _isolate_secrets(monkeypatch, tmp_path)
     monkeypatch.setattr(cli.secrets, "get_token", lambda p: "tok" if p == "vultr" else None)
-    # label "SimpliMEI-Core-Production" matches the "simplimei" alias by substring
+    # label "app-prod" matches the "app" alias by substring
     monkeypatch.setattr(
         cli.vultr,
         "fetch_servers",
         lambda token, timeout=15: {
-            "SimpliMEI-Core-Production": ServerBilling(
-                "SimpliMEI-Core-Production", date(2026, 5, 20), 48.0, 48.0, "USD"
+            "app-prod": ServerBilling(
+                "app-prod", date(2026, 5, 20), 48.0, 48.0, "USD"
             )
         },
     )
-    result = runner.invoke(cli.app, ["cost", "simplimei"])
+    result = runner.invoke(cli.app, ["cost", "app"])
     assert result.exit_code == 0
     assert "2026-05-20" in result.stdout
     assert "48.00" in result.stdout
@@ -252,10 +252,10 @@ def test_init_wizard_no_alias_makes_billing_only(monkeypatch, tmp_path):
         cli.hetzner,
         "fetch_servers",
         lambda token, timeout=15: {
-            "ubuntu-nexus": ServerBilling("ubuntu-nexus", date(2026, 5, 1), 6.49, 6.49, "EUR")
+            "web-01": ServerBilling("web-01", date(2026, 5, 1), 6.49, 6.49, "EUR")
         },
     )
-    monkeypatch.setattr(cli.ssh, "list_aliases", lambda: [])  # nenhum alias no ssh config
+    monkeypatch.setattr(cli.ssh, "list_aliases", lambda: [])  # no alias in the ssh config
     # import(enter) / empty alias(enter) / empty price(enter)
     result = runner.invoke(cli.app, ["init"], input="\n\n\n")
     assert result.exit_code == 0
@@ -263,7 +263,7 @@ def test_init_wizard_no_alias_makes_billing_only(monkeypatch, tmp_path):
     assert 'ssh = ""' in text                    # billing-only
     assert 'provider = "Hetzner"' in text
     # the table key comes from the server name
-    assert "[hosts.ubuntu-nexus]" in text
+    assert "[hosts.web-01]" in text
 
 
 def test_status_skips_billing_only_host(monkeypatch, tmp_path):
@@ -297,12 +297,12 @@ def test_cost_discovers_servers_without_config(monkeypatch, tmp_path):
         cli.hetzner,
         "fetch_servers",
         lambda token, timeout=15: {
-            "ubuntu-nexus": ServerBilling("ubuntu-nexus", date(2026, 5, 1), 6.49, 6.49, "EUR")
+            "web-01": ServerBilling("web-01", date(2026, 5, 1), 6.49, 6.49, "EUR")
         },
     )
     result = runner.invoke(cli.app, ["cost"])
     assert result.exit_code == 0
-    assert "ubuntu-nexus" in result.stdout      # discovered via the API
+    assert "web-01" in result.stdout      # discovered via the API
     assert "6.49" in result.stdout
 
 
@@ -456,17 +456,17 @@ def test_init_wizard_imports_from_api(monkeypatch, tmp_path):
         cli.hetzner,
         "fetch_servers",
         lambda token, timeout=15: {
-            "ubuntu-nexus": ServerBilling("ubuntu-nexus", date(2026, 5, 1), 6.49, 6.49, "EUR")
+            "web-01": ServerBilling("web-01", date(2026, 5, 1), 6.49, 6.49, "EUR")
         },
     )
-    monkeypatch.setattr(cli.ssh, "list_aliases", lambda: ["nexus", "db"])
+    monkeypatch.setattr(cli.ssh, "list_aliases", lambda: ["web", "db"])
     # confirm import (enter=yes) / default alias (enter) / empty fixed price (enter)
     result = runner.invoke(cli.app, ["init"], input="\n\n\n")
     assert result.exit_code == 0
     text = path.read_text()
     assert 'provider = "Hetzner"' in text
-    assert 'ssh = "nexus"' in text          # alias suggested from ubuntu-nexus
-    assert "[hosts.nexus]" in text
+    assert 'ssh = "web"' in text          # alias suggested from web-01
+    assert "[hosts.web]" in text
 
 
 def test_init_wizard_pins_promo_price(monkeypatch, tmp_path):
@@ -483,12 +483,12 @@ def test_init_wizard_pins_promo_price(monkeypatch, tmp_path):
         cli.hetzner,
         "fetch_servers",
         lambda token, timeout=15: {
-            "ubuntu-nexus": ServerBilling("ubuntu-nexus", date(2026, 5, 1), 6.49, 6.49, "EUR")
+            "web-01": ServerBilling("web-01", date(2026, 5, 1), 6.49, 6.49, "EUR")
         },
     )
     monkeypatch.setattr(cli.ssh, "list_aliases", lambda: [])
-    # import / alias "nexus" / fixed price "4.99"
-    result = runner.invoke(cli.app, ["init"], input="\nnexus\n4.99\n")
+    # import / alias "web" / fixed price "4.99"
+    result = runner.invoke(cli.app, ["init"], input="\nweb\n4.99\n")
     assert result.exit_code == 0
     text = path.read_text()
     assert "cost = 4.99" in text

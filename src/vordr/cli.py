@@ -361,7 +361,9 @@ app.add_typer(secret_app, name="secret")
 
 def _store_token_flow(provider: str) -> bool:
     """Prompt, validate (one API read) and store the token. True if stored."""
-    token = typer.prompt(f"API token ({provider})", hide_input=True).strip()
+    # default="" so an empty enter aborts cleanly instead of trapping Click in a re-prompt loop
+    token = typer.prompt(f"API token ({provider})", hide_input=True,
+                         default="", show_default=False).strip()
     if not token:
         err_console.print("[red]empty token.[/]")
         return False
@@ -1285,10 +1287,29 @@ def _evaluate_alerts(
 
 
 def _push_mark(a: _Alert) -> str:
-    """Body marker: ✓ for a recovery (tier 0), ! for critical, - otherwise."""
+    """Body marker for a push (no color there, so a dot carries the severity).
+
+    🟢 recovery (tier 0), 🔴 critical, 🟡 otherwise — mirroring the terminal's
+    green/red/yellow thresholds.
+    """
     if a.tier == 0:
-        return "✓"
-    return "!" if a.crit else "-"
+        return "🟢"
+    return "🔴" if a.crit else "🟡"
+
+
+def _push_title(alerts: list[_Alert]) -> str:
+    """A one-line headline summarising the push, e.g. ``🐺 vordr · 1 critical · 1 recovered``."""
+    crit = sum(1 for a in alerts if a.tier > 0 and a.crit)
+    warn = sum(1 for a in alerts if a.tier > 0 and not a.crit)
+    rec = sum(1 for a in alerts if a.tier == 0)
+    parts: list[str] = []
+    if crit:
+        parts.append(f"{crit} critical")
+    if warn:
+        parts.append(f"{warn} alert" + ("s" if warn > 1 else ""))
+    if rec:
+        parts.append(f"{rec} recovered")
+    return f"🐺 vordr · {' · '.join(parts) or 'update'}"
 
 
 def _telegram_creds(config: Config) -> tuple[str | None, str | None] | None:
@@ -1310,12 +1331,17 @@ def _email_creds(config: Config) -> notify.EmailTarget | None:
     return None
 
 
+def _push_body(alerts: list[_Alert]) -> str:
+    """The notification body — one dot-marked line per alert (shared by real and test pushes)."""
+    return "\n".join(f"{_push_mark(a)} {a.who} — {a.text}" for a in alerts)
+
+
 def _push_alerts(alerts: list[_Alert], config: Config) -> None:
-    title = f"vordr · {len(alerts)} update(s)"
-    body = "\n".join(f"{_push_mark(a)} {a.who}: {a.text}" for a in alerts)
+    title = _push_title(alerts)
     try:
-        sent = notify.send(title, body, ntfy=config.ntfy, telegram=_telegram_creds(config),
-                           email=_email_creds(config), critical=any(a.crit for a in alerts))
+        sent = notify.send(title, _push_body(alerts), ntfy=config.ntfy,
+                           telegram=_telegram_creds(config), email=_email_creds(config),
+                           critical=any(a.crit for a in alerts))
     except notify.NotifyError as exc:
         err_console.print(f"[red]notify failed:[/] {exc}")
         return
@@ -1323,6 +1349,40 @@ def _push_alerts(alerts: list[_Alert], config: Config) -> None:
         console.print(indent(meta(f"pushed to {', '.join(sent)}")))
     else:
         console.print(indent(meta("no notify channel — run `vordr setup` to configure push")))
+
+
+def _sample_alerts() -> list[_Alert]:
+    """A representative one-of-each alert set, so a test push shows the real layout."""
+    return [
+        _Alert(True, "db", "domain EXPIRED (2026-06-28)", key="db:domain", tier=3),
+        _Alert(False, "Hetzner", "charge in 6d (≈ EUR 4.99, 2026-07-01)",
+               key="hetzner:charge", tier=1),
+        _Alert(False, "web", "back online", key="web:offline", tier=0),
+    ]
+
+
+def _send_test(config: Config, *, only: str | None = None) -> None:
+    """Push a sample alert (the real structure) to the configured channels, or just ``only``."""
+    chans = _configured_channels(config)
+    if only:
+        chans = [c for c in chans if c == only]
+    if not chans:
+        err_console.print("[yellow]no channel to test — run `vordr setup` first.[/]")
+        return
+    title = "🐺 vordr · test notification"
+    body = _push_body(_sample_alerts())
+    try:
+        sent = notify.send(
+            title, body,
+            ntfy=config.ntfy if "ntfy" in chans else None,
+            telegram=_telegram_creds(config) if "telegram" in chans else None,
+            email=_email_creds(config) if "email" in chans else None,
+            critical=True,
+        )
+        if sent:
+            console.print(indent(meta(f"sent via {', '.join(sent)} — check your device")))
+    except notify.NotifyError as exc:
+        err_console.print(f"[red]test failed:[/] {exc}")
 
 
 def _notify_state_path() -> Path:
@@ -1494,7 +1554,7 @@ def _check_once(notify_: bool, timeout: int) -> int:
 @app.command()
 def check(
     notify_: bool = typer.Option(
-        False, "--notify", help="Push the alerts to the configured channel (ntfy)."
+        False, "--notify", help="Push the alerts to your configured channel(s)."
     ),
     watch: str = typer.Option(
         "", "--watch", "-w", help="Re-run on an interval (e.g. 30m, 6h, 1d) instead of once."
@@ -1639,6 +1699,39 @@ def _existing_notify(config: Config) -> dict:
     return out
 
 
+def _configured_channels(config: Config) -> list[str]:
+    """Channels that are fully wired and will actually fire (secret + address present)."""
+    names: list[str] = []
+    if _telegram_creds(config):
+        names.append("telegram")
+    if _email_creds(config):
+        names.append("email")
+    if config.ntfy:
+        names.append("ntfy")
+    return names
+
+
+def _resolve_channel(text: str) -> str | None:
+    """Map a free-text pick to a canonical channel name; None means 'keep/skip'."""
+    t = text.strip().lower()
+    if t.startswith("e"):
+        return "email"
+    if t.startswith("n"):
+        return "ntfy"
+    if t.startswith("t"):
+        return "telegram"
+    return None
+
+
+def _setup_channel(name: str, config: Config) -> dict:
+    """Run the right channel wizard and return its notify keys."""
+    if name == "email":
+        return _setup_email_channel()
+    if name == "ntfy":
+        return _setup_ntfy_channel(config)
+    return _setup_telegram_channel()
+
+
 def _setup_telegram_channel() -> dict:
     """Store the bot token, then auto-detect the chat id from a message to the bot."""
     console.print(indent(meta("create a bot: open @BotFather → /newbot → copy the token")))
@@ -1662,7 +1755,7 @@ def _setup_telegram_channel() -> dict:
 def setup() -> None:
     """Guided setup for alerts & notifications — type a value, press enter, done.
 
-    Configures the push channel (Telegram or ntfy), the alert thresholds and, optionally,
+    Configures a push channel (Telegram, email or ntfy), the alert thresholds and, optionally,
     a daily per-user timer. It writes only the ``[alerts]`` and ``[notify]`` sections of
     your config; everything else is left untouched.
     """
@@ -1679,16 +1772,30 @@ def setup() -> None:
     console.print(indent(brand("setup")))
     console.print()
 
-    # 1. channel — add one (existing channels are kept, so you can receive on several)
-    console.print(indent(meta("where should alerts go?  pick one — run setup again to add more")))
-    channel = typer.prompt("  channel [telegram/email/ntfy]", default="telegram").strip().lower()
-    if channel.startswith("e"):
-        chosen = _setup_email_channel()
-    elif channel.startswith("n"):
-        chosen = _setup_ntfy_channel(config)
+    # 1. channel — keep what's configured, or add/replace one (channels stack)
+    notify_section = _existing_notify(config)
+    existing = _configured_channels(config)
+    if existing:
+        console.print(indent(meta(f"already configured: {', '.join(existing)}")))
+        pick = typer.prompt(
+            "  press enter to keep, or name a channel to add/change [telegram/email/ntfy]",
+            default="keep", show_default=False,
+        )
     else:
-        chosen = _setup_telegram_channel()
-    notify_section = {**_existing_notify(config), **chosen}
+        console.print(indent(meta("where should alerts go?  run setup again to add more")))
+        pick = typer.prompt("  channel [telegram/email/ntfy]", default="telegram")
+
+    name = _resolve_channel(pick)
+    test_target: str | None = None
+    if name and name in existing:
+        # an already-wired channel: offer a test of just this one, or an explicit reconfigure
+        if typer.confirm(f"  {name} is already set up — send it a test now?", default=True):
+            test_target = name
+        elif typer.confirm(f"  reconfigure {name} instead?", default=False):
+            notify_section.update(_setup_channel(name, config))
+            test_target = name
+    elif name:
+        notify_section.update(_setup_channel(name, config))   # new channel — verify w/ `vordr test`
 
     # 2. thresholds
     runway = typer.prompt("  warn when a bonus/credit runs out within N days",
@@ -1702,19 +1809,11 @@ def setup() -> None:
     })
     console.print(indent(meta(f"saved to {path}")))
 
-    # 3. test push — through every channel now configured
-    cfg = _load_config(require_hosts=False)
-    telegram, email = _telegram_creds(cfg), _email_creds(cfg)
-    if (cfg.ntfy or telegram or email) and typer.confirm(
-        "  send a test notification now?", default=True
-    ):
-        try:
-            sent = notify.send("vordr · test", "setup complete — your alerts will arrive here.",
-                               ntfy=cfg.ntfy, telegram=telegram, email=email)
-            if sent:
-                console.print(indent(meta(f"sent via {', '.join(sent)} — check your device")))
-        except notify.NotifyError as exc:
-            err_console.print(f"[red]test failed:[/] {exc}")
+    # 3. test push — reload so freshly-saved channels are picked up; `vordr test` re-runs it
+    if test_target:
+        _send_test(_load_config(require_hosts=False), only=test_target)
+    else:
+        console.print(indent(meta("test your channels anytime with `vordr test`")))
 
     # 4. scheduling — without this nothing runs `check`, so nothing ever alerts.
     # Default to YES (the timer is per-user and reversible) so accepting the prompt is
@@ -1731,6 +1830,22 @@ def setup() -> None:
                     f"enabled vordr-check.timer (09:00 daily) — remove: {rm}")))
     if not scheduled:
         _warn_not_scheduled()
+    console.print()
+
+
+@app.command("test")
+def test_notify() -> None:
+    """Send a sample alert through every configured channel — to verify the look and wiring.
+
+    The push uses the real notification layout (a one-line summary plus a colored dot per
+    item), so what lands on your device is exactly what a live ``vordr check --notify``
+    would send. Configure channels first with ``vordr setup``.
+    """
+    config = _load_config(require_hosts=False)
+    console.print()
+    console.print(indent(brand("test")))
+    console.print()
+    _send_test(config)
     console.print()
 
 

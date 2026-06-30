@@ -1,8 +1,8 @@
 from vordr import ssh
 
 SSH_CONFIG = """\
-# meu ssh config
-Host nexus
+# my ssh config
+Host web
     HostName 10.0.0.1
     User root
 
@@ -22,7 +22,7 @@ def test_list_aliases_reads_hosts(tmp_path):
     cfg.write_text(SSH_CONFIG, encoding="utf-8")
     aliases = ssh.list_aliases(cfg)
     # skip wildcard patterns (*.internal, *) and keep the order
-    assert aliases == ["nexus", "db", "prod-db"]
+    assert aliases == ["web", "db", "prod-db"]
 
 
 def test_list_aliases_missing_file(tmp_path):

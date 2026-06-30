@@ -5,7 +5,7 @@ from vordr import hetzner
 PAYLOAD = {
     "servers": [
         {
-            "name": "ubuntu-nexus",
+            "name": "web-01",
             "created": "2026-05-19T02:40:26Z",
             "datacenter": {"location": {"name": "nbg1"}},
             "server_type": {
@@ -22,8 +22,8 @@ PAYLOAD = {
 
 def test_parse_servers_picks_location_price():
     servers = hetzner.parse_servers(PAYLOAD)
-    assert set(servers) == {"ubuntu-nexus"}
-    b = servers["ubuntu-nexus"]
+    assert set(servers) == {"web-01"}
+    b = servers["web-01"]
     assert b.created == date(2026, 5, 19)
     assert b.cost_net == 5.45
     assert b.cost_gross == 6.49

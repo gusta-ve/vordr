@@ -71,9 +71,9 @@ class _JsonResp:
 def test_telegram_validate_ok(monkeypatch):
     monkeypatch.setattr(
         urllib.request, "urlopen",
-        lambda url, timeout=10: _JsonResp({"ok": True, "result": {"username": "gusta_vordr_bot"}}),
+        lambda url, timeout=10: _JsonResp({"ok": True, "result": {"username": "vordr_demo_bot"}}),
     )
-    assert notify.telegram_validate("123:ABC") == "gusta_vordr_bot"
+    assert notify.telegram_validate("123:ABC") == "vordr_demo_bot"
 
 
 def test_telegram_validate_rejected(monkeypatch):

@@ -3,6 +3,33 @@
 All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.0.0]
+
+The first stable release. Vordr now answers the three day-to-day questions about your
+hosts — *are they up?*, *will I be charged?*, *are they secure?* — over plain SSH, with
+no agents, no database and no secrets in the repo. The CLI surface (`status`, `resources`,
+`security`, `cost`, `billing`, `check`, `setup`, `test`, `init`, `hosts`, `secret`) and its
+config are considered stable from here on.
+
+### Added
+- **`vordr test`** — send a sample alert through every configured channel on demand. It uses
+  the real notification layout (summary line + a colored dot per item), so what lands on your
+  device is exactly what a live `vordr check --notify` would send.
+
+### Changed
+- **Notifications got a visual refresh.** A push now leads with a one-line summary
+  (`🐺 vordr · 1 critical · 1 alert · 1 recovered`) and tags each line with a colored dot
+  — 🔴 critical, 🟡 attention, 🟢 recovered — mirroring the terminal's thresholds, so a
+  glance at the lock screen is enough.
+- **`vordr setup` stops fighting you over configured channels.** Pressing enter now just
+  *keeps* what's there. Naming a channel that's already set up offers to **test that one**
+  instead of forcing the token again; you only re-enter a token to add or reconfigure a
+  channel. An empty token prompt aborts cleanly instead of looping.
+
+### Housekeeping
+- Generalized the wording that still implied ntfy was the only channel; the docs and help
+  now name all three (Telegram, email, ntfy). Test fixtures use neutral example hosts.
+
 ## [0.12.0]
 
 ### Added

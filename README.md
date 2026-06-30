@@ -137,9 +137,10 @@ vordr cost web            # detailed lifecycle panel for one host
 vordr cost --offline      # no network: uses only the config
 vordr billing             # balance/credit and next charge per provider
 vordr check               # triage: only what needs attention (for cron)
-vordr check --notify      # ...and push the alerts to your phone (ntfy)
+vordr check --notify      # ...and push the alerts to Telegram / email / ntfy
 vordr check --watch 6h    # ...keep it on an interval (no system changes)
 vordr setup               # guided setup for alerts & notifications
+vordr test                # send a sample alert to your channels (verify the look)
 vordr hosts               # lists what's configured
 
 vordr secret set hetzner  # stores the API token (chmod 600, outside the repo)
@@ -227,6 +228,20 @@ fires on each alert):
 - **ntfy** — no account, just a topic; set `[notify] ntfy = "https://ntfy.sh/<topic>"`
   (or `VORDR_NTFY_URL`). Needs the ntfy app (or a browser tab) subscribed to the topic.
 
+A push reads at a glance — a one-line summary, then a colored dot per item (🔴 critical,
+🟡 attention, 🟢 recovered) mirroring the terminal's thresholds:
+
+```
+🐺 vordr · 1 critical · 1 alert · 1 recovered
+
+🔴 db — domain EXPIRED (2026-06-28)
+🟡 Hetzner — charge in 6d (≈ EUR 4.99, 2026-07-01)
+🟢 web — back online
+```
+
+Run `vordr test` anytime to push a sample alert in this exact layout to every configured
+channel — handy right after `vordr setup`, or to confirm a channel still delivers.
+
 ### Push only when it changes (no alarm fatigue)
 
 On a timer, a standing alert — say a charge seven days out — would otherwise push on every
@@ -259,7 +274,7 @@ suits you:
 | Domain expiry    | `src/vordr/rdap.py`    | Public RDAP + on-disk cache (no credential).    |
 | Provider API     | `src/vordr/hetzner.py`, `src/vordr/vultr.py` | Read-only clients (since, price, balance). |
 | Secrets          | `src/vordr/secrets.py` | Tokens outside the repo (env > chmod-600 file). |
-| Alerts / push    | `src/vordr/notify.py`  | `vordr check` push channels (ntfy first).       |
+| Alerts / push    | `src/vordr/notify.py`  | `vordr check` push channels (Telegram/email/ntfy).|
 | Formatting       | `src/vordr/format.py`  | Pure functions (uptime, bytes, color thresholds).|
 | CLI              | `src/vordr/cli.py`     | Typer + Rich; orchestrates everything in parallel.|
 
