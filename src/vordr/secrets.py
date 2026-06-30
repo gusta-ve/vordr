@@ -17,6 +17,7 @@ ENV_VARS = {
     "hetzner": "HCLOUD_TOKEN",
     "vultr": "VULTR_API_KEY",
     "telegram": "VORDR_TELEGRAM_TOKEN",   # notify channel, not a cloud provider
+    "email": "VORDR_EMAIL_PASSWORD",      # SMTP app password for the email channel
 }
 
 

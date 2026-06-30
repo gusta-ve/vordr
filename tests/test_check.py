@@ -268,7 +268,7 @@ def test_check_notify_routes_to_telegram(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_resolve_domain_expiries", lambda *a, **k: {})
     captured = {}
 
-    def fake_send(title, body, *, ntfy=None, telegram=None, critical=False, timeout=10):
+    def fake_send(title, body, *, ntfy=None, telegram=None, email=None, critical=False, timeout=10):
         captured["telegram"] = telegram
         return ["telegram"] if telegram else []
 
@@ -276,6 +276,37 @@ def test_check_notify_routes_to_telegram(monkeypatch, tmp_path):
     result = runner.invoke(cli.app, ["check", "--notify"])
     assert result.exit_code == 1
     assert captured["telegram"] == ("123:ABC", "555")   # token + chat passed through
+
+
+def test_check_notify_fires_telegram_and_email_together(monkeypatch, tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[hosts.box]\nssh = ""\n  [hosts.box.server]\n'
+        '  provider = "Hetzner"\n  expires = "2000-01-01"\n'
+        '[notify]\ntelegram_chat = "555"\nemail = "me@gmail.com"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("VORDR_CONFIG", str(path))
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setenv("VORDR_NOTIFY_STATE", str(tmp_path / "state.json"))
+    monkeypatch.setenv("VORDR_SECRETS", str(tmp_path / "secrets.toml"))
+    monkeypatch.delenv("HCLOUD_TOKEN", raising=False)
+    monkeypatch.delenv("VULTR_API_KEY", raising=False)
+    monkeypatch.setenv("VORDR_TELEGRAM_TOKEN", "123:ABC")
+    monkeypatch.setenv("VORDR_EMAIL_PASSWORD", "app-pw")
+    monkeypatch.setattr(cli, "_resolve_domain_expiries", lambda *a, **k: {})
+    captured = {}
+
+    def fake_send(title, body, *, ntfy=None, telegram=None, email=None, critical=False, timeout=10):
+        captured["telegram"], captured["email"] = telegram, email
+        return [c for c, v in (("telegram", telegram), ("email", email)) if v]
+
+    monkeypatch.setattr(cli.notify, "send", fake_send)
+    result = runner.invoke(cli.app, ["check", "--notify"])
+    assert result.exit_code == 1
+    assert captured["telegram"] == ("123:ABC", "555")
+    assert captured["email"] == cli.notify.EmailTarget(
+        "smtp.gmail.com", 587, "me@gmail.com", "app-pw", "me@gmail.com")
 
 
 def test_recovered_offline_only_for_offline_keys():

@@ -111,3 +111,61 @@ def test_send_posts_to_telegram(monkeypatch):
 def test_send_telegram_skipped_when_incomplete():
     assert notify.send("t", "b", telegram=(None, "555")) == []   # no token
     assert notify.send("t", "b", telegram=("123", None)) == []   # no chat
+
+
+def test_send_posts_to_email(monkeypatch):
+    captured = {}
+
+    class FakeSMTP:
+        def __init__(self, host, port, timeout=10):
+            captured["host"], captured["port"] = host, port
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def starttls(self):
+            captured["tls"] = True
+
+        def login(self, user, password):
+            captured["login"] = (user, password)
+
+        def send_message(self, msg):
+            captured["msg"] = msg
+
+    monkeypatch.setattr(notify.smtplib, "SMTP", FakeSMTP)
+    target = notify.EmailTarget("smtp.gmail.com", 587, "me@gmail.com", "app-pw", "you@gmail.com")
+    sent = notify.send("vordr · test", "! web: offline", email=target)
+    assert sent == ["email"]
+    assert captured["tls"] is True
+    assert captured["login"] == ("me@gmail.com", "app-pw")
+    assert captured["msg"]["To"] == "you@gmail.com"
+    assert captured["msg"]["Subject"] == "vordr · test"
+    assert "offline" in captured["msg"].get_content()
+
+
+def test_email_validate_raises_on_login_failure(monkeypatch):
+    import smtplib
+
+    class FakeSMTP:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def starttls(self):
+            pass
+
+        def login(self, u, p):
+            raise smtplib.SMTPAuthenticationError(535, b"bad app password")
+
+    monkeypatch.setattr(notify.smtplib, "SMTP", FakeSMTP)
+    target = notify.EmailTarget("smtp.gmail.com", 587, "me@gmail.com", "wrong", "me@gmail.com")
+    with pytest.raises(notify.NotifyError):
+        notify.email_validate(target)

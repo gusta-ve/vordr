@@ -1,9 +1,11 @@
 """Push notifications for `vordr check --notify`.
 
-Two channels ship today:
+Three channels ship today (configure as many as you like — every one fires):
 
 - **Telegram** — for delivery through an app you already use. Configure the bot token as
   a secret (``vordr secret set telegram``) and the chat id in ``[notify] telegram_chat``.
+- **Email** — a plain Gmail-style SMTP message. The app password is a secret
+  (``vordr secret set email``); the address lives in ``[notify] email``.
 - **ntfy** (https://ntfy.sh) — no account, just a topic URL. Configure with
   ``[notify] ntfy = "https://ntfy.sh/<your-topic>"`` (or ``VORDR_NTFY_URL``).
 
@@ -15,12 +17,24 @@ from __future__ import annotations
 
 import json
 import os
+import smtplib
 import urllib.error
 import urllib.parse
 import urllib.request
+from email.message import EmailMessage
+from typing import NamedTuple
 
 DEFAULT_TIMEOUT = 10
 _TG_API = "https://api.telegram.org/bot{token}/{method}"
+
+
+class EmailTarget(NamedTuple):
+    """Everything :func:`_send_email` needs (the password is a secret, kept off config)."""
+    host: str
+    port: int
+    user: str
+    password: str
+    to: str
 
 
 class NotifyError(RuntimeError):
@@ -106,12 +120,38 @@ def _send_telegram(token: str, chat_id: str, title: str, body: str, *, timeout: 
         raise NotifyError(f"telegram: {exc}") from exc
 
 
+def _smtp_send(target: EmailTarget, build, *, timeout: int) -> None:
+    """Open an authenticated Gmail-style SMTP session (STARTTLS) and run ``build(session)``."""
+    try:
+        with smtplib.SMTP(target.host, target.port, timeout=timeout) as session:
+            session.starttls()
+            session.login(target.user, target.password)
+            build(session)
+    except (smtplib.SMTPException, OSError) as exc:
+        raise NotifyError(f"email: {exc}") from exc
+
+
+def email_validate(target: EmailTarget, *, timeout: int = DEFAULT_TIMEOUT) -> None:
+    """Verify the SMTP credentials by logging in (and nothing else), else raise NotifyError."""
+    _smtp_send(target, lambda _session: None, timeout=timeout)
+
+
+def _send_email(target: EmailTarget, title: str, body: str, *, timeout: int) -> None:
+    msg = EmailMessage()
+    msg["Subject"] = title
+    msg["From"] = target.user
+    msg["To"] = target.to
+    msg.set_content(body or title)
+    _smtp_send(target, lambda session: session.send_message(msg), timeout=timeout)
+
+
 def send(
     title: str,
     body: str,
     *,
     ntfy: str | None = None,
     telegram: tuple[str | None, str | None] | None = None,
+    email: EmailTarget | None = None,
     critical: bool = False,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> list[str]:
@@ -130,4 +170,7 @@ def send(
         if token and chat:
             _send_telegram(token, chat, title, body, timeout=timeout)
             sent.append("telegram")
+    if email:
+        _send_email(email, title, body, timeout=timeout)
+        sent.append("email")
     return sent

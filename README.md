@@ -212,12 +212,18 @@ sections of your config (the rest is left untouched), then can send a test push.
 ```
 
 Thresholds live in `[alerts]` (`runway_days`, default 14; `charge_days`, default 7).
-Two notification channels ship — pick what you already use (or both):
+Three notification channels ship — pick what you already use, or **several at once**
+(`vordr setup` adds a channel without dropping the others, and every configured channel
+fires on each alert):
 
 - **Telegram** — delivery through an app you already have, no extra install. Create a bot
   with [@BotFather](https://t.me/BotFather) (`/newbot`), then `vordr secret set telegram`
   (the token is stored chmod 600, outside the repo). `vordr setup` auto-detects the chat id
   from a message you send the bot and writes `[notify] telegram_chat`.
+- **Email (Gmail)** — for the inbox you already watch. Generate an
+  [app password](https://myaccount.google.com/apppasswords) (needs 2FA), then
+  `vordr secret set email`; the address goes in `[notify] email`. `vordr setup` checks the
+  SMTP login before saving.
 - **ntfy** — no account, just a topic; set `[notify] ntfy = "https://ntfy.sh/<topic>"`
   (or `VORDR_NTFY_URL`). Needs the ntfy app (or a browser tab) subscribed to the topic.
 

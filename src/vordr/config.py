@@ -91,6 +91,10 @@ class Config:
     charge_days: int = 7      # warn when a charge/renewal/expiry is within N days
     ntfy: str | None = None   # ntfy URL/topic for `vordr check --notify`
     telegram_chat: str | None = None   # Telegram chat id (token lives in secrets)
+    email: str | None = None           # Gmail address (sender; app password in secrets)
+    email_to: str | None = None        # recipient, if different from `email`
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
     source: Path | None = None
 
     def host(self, name: str) -> Host:
@@ -182,6 +186,10 @@ def parse(data: dict, *, source: Path | None = None) -> Config:
         charge_days=int(alerts.get("charge_days", 7)),
         ntfy=notify.get("ntfy") or None,
         telegram_chat=str(notify["telegram_chat"]) if notify.get("telegram_chat") else None,
+        email=notify.get("email") or None,
+        email_to=notify.get("email_to") or None,
+        smtp_host=notify.get("smtp_host", "smtp.gmail.com"),
+        smtp_port=int(notify.get("smtp_port", 587)),
         source=source,
     )
 

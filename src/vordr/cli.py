@@ -1299,12 +1299,23 @@ def _telegram_creds(config: Config) -> tuple[str | None, str | None] | None:
     return None
 
 
+def _email_creds(config: Config) -> notify.EmailTarget | None:
+    """An EmailTarget if the address and the app password are both present, else None."""
+    password = secrets.get_token("email")
+    if config.email and password:
+        return notify.EmailTarget(
+            host=config.smtp_host, port=config.smtp_port, user=config.email,
+            password=password, to=config.email_to or config.email,
+        )
+    return None
+
+
 def _push_alerts(alerts: list[_Alert], config: Config) -> None:
     title = f"vordr · {len(alerts)} update(s)"
     body = "\n".join(f"{_push_mark(a)} {a.who}: {a.text}" for a in alerts)
     try:
         sent = notify.send(title, body, ntfy=config.ntfy, telegram=_telegram_creds(config),
-                           critical=any(a.crit for a in alerts))
+                           email=_email_creds(config), critical=any(a.crit for a in alerts))
     except notify.NotifyError as exc:
         err_console.print(f"[red]notify failed:[/] {exc}")
         return
@@ -1592,6 +1603,42 @@ def _setup_ntfy_channel(config: Config) -> dict:
     return {"ntfy": typer.prompt("  ntfy URL/topic", default=default_topic).strip()}
 
 
+def _setup_email_channel() -> dict:
+    """Validate a Gmail address + app password (SMTP login), store the password, keep the email."""
+    console.print(indent(meta("gmail app password (2FA required): "
+                              "myaccount.google.com/apppasswords")))
+    addr = typer.prompt("  your gmail address").strip()
+    # Google shows the app password grouped with spaces; the real value has none
+    password = "".join(typer.prompt("  gmail app password (16 chars)", hide_input=True).split())
+    if not addr or not password:
+        err_console.print("[red]address and app password are required.[/]")
+        raise typer.Exit(1)
+    target = notify.EmailTarget(host="smtp.gmail.com", port=587, user=addr,
+                                password=password, to=addr)
+    try:
+        notify.email_validate(target, timeout=20)
+    except notify.NotifyError as exc:
+        err_console.print(f"[red]login failed:[/] {exc}")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]✔[/] smtp login OK for [bold]{addr}[/]")
+    secrets.set_token("email", password)
+    return {"email": addr}
+
+
+def _existing_notify(config: Config) -> dict:
+    """The notify keys already on file, so setup can ADD a channel without dropping others."""
+    out: dict = {}
+    if config.telegram_chat:
+        out["telegram_chat"] = config.telegram_chat
+    if config.email:
+        out["email"] = config.email
+    if config.email_to:
+        out["email_to"] = config.email_to
+    if config.ntfy:
+        out["ntfy"] = config.ntfy
+    return out
+
+
 def _setup_telegram_channel() -> dict:
     """Store the bot token, then auto-detect the chat id from a message to the bot."""
     console.print(indent(meta("create a bot: open @BotFather → /newbot → copy the token")))
@@ -1632,11 +1679,16 @@ def setup() -> None:
     console.print(indent(brand("setup")))
     console.print()
 
-    # 1. channel — Telegram (an app you already use) or ntfy
-    console.print(indent(meta("where should alerts go?  telegram = an app you already use")))
-    channel = typer.prompt("  channel [telegram/ntfy]", default="telegram").strip().lower()
-    notify_section = (_setup_telegram_channel() if channel.startswith("t")
-                      else _setup_ntfy_channel(config))
+    # 1. channel — add one (existing channels are kept, so you can receive on several)
+    console.print(indent(meta("where should alerts go?  pick one — run setup again to add more")))
+    channel = typer.prompt("  channel [telegram/email/ntfy]", default="telegram").strip().lower()
+    if channel.startswith("e"):
+        chosen = _setup_email_channel()
+    elif channel.startswith("n"):
+        chosen = _setup_ntfy_channel(config)
+    else:
+        chosen = _setup_telegram_channel()
+    notify_section = {**_existing_notify(config), **chosen}
 
     # 2. thresholds
     runway = typer.prompt("  warn when a bonus/credit runs out within N days",
@@ -1650,13 +1702,15 @@ def setup() -> None:
     })
     console.print(indent(meta(f"saved to {path}")))
 
-    # 3. test push — through whatever channel we just configured
+    # 3. test push — through every channel now configured
     cfg = _load_config(require_hosts=False)
-    telegram = _telegram_creds(cfg)
-    if (cfg.ntfy or telegram) and typer.confirm("  send a test notification now?", default=True):
+    telegram, email = _telegram_creds(cfg), _email_creds(cfg)
+    if (cfg.ntfy or telegram or email) and typer.confirm(
+        "  send a test notification now?", default=True
+    ):
         try:
             sent = notify.send("vordr · test", "setup complete — your alerts will arrive here.",
-                               ntfy=cfg.ntfy, telegram=telegram)
+                               ntfy=cfg.ntfy, telegram=telegram, email=email)
             if sent:
                 console.print(indent(meta(f"sent via {', '.join(sent)} — check your device")))
         except notify.NotifyError as exc:

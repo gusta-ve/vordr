@@ -3,6 +3,16 @@
 All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.12.0]
+
+### Added
+- **Email notifications (Gmail/SMTP).** A third channel — for the inbox you already watch.
+  `vordr secret set email` stores a Gmail app password (chmod 600, outside the repo) and
+  `[notify] email` holds the address; `vordr setup` validates the SMTP login before saving.
+- **Several channels at once.** `vordr setup` now *adds* a channel instead of replacing the
+  others, so you can receive on Telegram **and** email **and** ntfy together — every
+  configured channel fires on each alert.
+
 ## [0.11.1]
 
 ### Changed
