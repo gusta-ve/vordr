@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import secrets as pysecrets
 import shutil
@@ -1202,6 +1203,20 @@ class _Alert:
     crit: bool
     who: str       # host display or provider name
     text: str
+    key: str = ""  # stable identity for notify dedup (e.g. "Hetzner:charge")
+    tier: int = 1  # urgency tier; a push fires when the tier rises (or the key is new)
+
+
+def _urgency_tier(days: int) -> int:
+    """Map days-until-event to an urgency tier, so dedup re-notifies on escalation only.
+
+    1 = upcoming (in the window), 2 = imminent (≤ 1 day), 3 = due/overdue (≤ 0).
+    """
+    if days <= 0:
+        return 3
+    if days <= 1:
+        return 2
+    return 1
 
 
 def _evaluate_alerts(
@@ -1218,19 +1233,22 @@ def _evaluate_alerts(
     for host, lc in rows:
         name = host.display
         if reach.get(host.name) is False:
-            alerts.append(_Alert(True, name, "offline (unreachable)"))
+            alerts.append(_Alert(True, name, "offline (unreachable)",
+                                 key=f"{host.name}:offline", tier=3))
         srv = host.server
         if srv.expires is not None:
             d = (srv.expires - today).days
             if d <= cd:
                 what = "renewal overdue" if d < 0 else f"renews in {d}d"
-                alerts.append(_Alert(d < 0, name, f"server {what} ({srv.expires.isoformat()})"))
+                alerts.append(_Alert(d < 0, name, f"server {what} ({srv.expires.isoformat()})",
+                                     key=f"{host.name}:server", tier=_urgency_tier(d)))
         if lc.domain_expiry is not None:
             d = (lc.domain_expiry - today).days
             if d <= cd:
                 what = "EXPIRED" if d < 0 else f"expires in {d}d"
                 when = lc.domain_expiry.isoformat()
-                alerts.append(_Alert(d <= 0, name, f"domain {what} ({when})"))
+                alerts.append(_Alert(d <= 0, name, f"domain {what} ({when})",
+                                     key=f"{host.name}:domain", tier=_urgency_tier(d)))
 
     provs = sorted({(h.server.provider or "").lower() for h, _ in rows} & set(_PROVIDER_CLIENTS))
     for prov in provs:
@@ -1244,6 +1262,7 @@ def _evaluate_alerts(
                 alerts.append(_Alert(
                     days <= cd, prov.capitalize(),
                     f"credit runs out in ~{days}d ({runout.isoformat()}) → card charges begin",
+                    key=f"{prov}:runway", tier=_urgency_tier(days),
                 ))
         elif burn:  # postpaid with real cost
             nxt = _first_of_next_month(today)
@@ -1251,13 +1270,21 @@ def _evaluate_alerts(
             if d <= cd:
                 est = f"≈ {cur} {burn:.2f}, " if cur else ""
                 alerts.append(_Alert(False, prov.capitalize(),
-                                     f"charge in {d}d ({est}{nxt.isoformat()})"))
+                                     f"charge in {d}d ({est}{nxt.isoformat()})",
+                                     key=f"{prov}:charge", tier=_urgency_tier(d)))
     return alerts
 
 
+def _push_mark(a: _Alert) -> str:
+    """Body marker: ✓ for a recovery (tier 0), ! for critical, - otherwise."""
+    if a.tier == 0:
+        return "✓"
+    return "!" if a.crit else "-"
+
+
 def _push_alerts(alerts: list[_Alert], config: Config) -> None:
-    title = f"vordr · {len(alerts)} alert(s)"
-    body = "\n".join(f"{'!' if a.crit else '-'} {a.who}: {a.text}" for a in alerts)
+    title = f"vordr · {len(alerts)} update(s)"
+    body = "\n".join(f"{_push_mark(a)} {a.who}: {a.text}" for a in alerts)
     try:
         sent = notify.send(title, body, ntfy=config.ntfy, critical=any(a.crit for a in alerts))
     except notify.NotifyError as exc:
@@ -1267,6 +1294,89 @@ def _push_alerts(alerts: list[_Alert], config: Config) -> None:
         console.print(indent(meta(f"pushed to {', '.join(sent)}")))
     else:
         console.print(indent(meta("no notify channel — run `vordr setup` to configure push")))
+
+
+def _notify_state_path() -> Path:
+    """Where the 'what did I already push' ledger lives (overridable for tests)."""
+    env = os.environ.get("VORDR_NOTIFY_STATE")
+    if env:
+        return Path(env)
+    return Path(os.path.expanduser("~/.cache/vordr/notify-state.json"))
+
+
+def _load_notify_state() -> dict[str, int]:
+    try:
+        raw = json.loads(_notify_state_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, int] = {}
+    for k, v in raw.items():
+        try:
+            out[str(k)] = int(v)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _save_notify_state(state: dict[str, int]) -> None:
+    path = _notify_state_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(state), encoding="utf-8")
+    except OSError:
+        pass  # a missing cache dir must never break the check itself
+
+
+def _select_to_push(
+    alerts: list[_Alert], state: dict[str, int]
+) -> tuple[list[_Alert], dict[str, int]]:
+    """Pick alerts worth pushing — new ones, or ones that climbed to a more urgent tier.
+
+    Standing alerts at the same tier stay silent; alerts that cleared drop out of the
+    ledger (so if they return later they count as new). Pure, so it's easy to test.
+    """
+    to_push = [a for a in alerts if a.tier > state.get(a.key, 0)]
+    new_state = {a.key: max(state.get(a.key, 0), a.tier) for a in alerts}
+    return to_push, new_state
+
+
+def _recovered_offline(
+    alerts: list[_Alert], state: dict[str, int], display: dict[str, str]
+) -> list[_Alert]:
+    """Hosts that were offline in the ledger but answer now → one-shot 'back online'.
+
+    Only offline (critical) keys get a recovery; cleared charge/domain/runway alerts
+    just drop out quietly. Recoveries carry ``tier=0`` so they're never deduped or stored.
+    """
+    current = {a.key for a in alerts}
+    out: list[_Alert] = []
+    for key in state:
+        if key.endswith(":offline") and key not in current:
+            name = key[: -len(":offline")]
+            out.append(_Alert(False, display.get(name, name), "back online", key=key, tier=0))
+    return out
+
+
+def _dispatch_notifications(alerts: list[_Alert], rows: list, config: Config) -> None:
+    """Decide what to push (new/escalated alerts + offline recoveries) and persist state.
+
+    Runs in both the all-clear and the has-alerts paths, so a recovery isn't lost when the
+    offline host was the only thing wrong.
+    """
+    state = _load_notify_state()
+    display = {h.name: h.display for h, _ in rows}
+    recovered = _recovered_offline(alerts, state, display)
+    to_push, new_state = _select_to_push(alerts, state)
+    for r in recovered:
+        console.print(indent(Text(f"✓ {r.who} {r.text}", style=OK)))
+    push_now = recovered + to_push
+    if push_now:
+        _push_alerts(push_now, config)
+    elif alerts:
+        console.print(indent(meta("no change since last push — quiet")))
+    _save_notify_state(new_state)
 
 
 def _parse_interval(value: str) -> int:
@@ -1279,6 +1389,29 @@ def _parse_interval(value: str) -> int:
         return max(1, int(float(s)))
     except ValueError as exc:
         raise typer.BadParameter(f"invalid interval '{value}' (try 30m, 6h, 1d)") from exc
+
+
+def _probe_reachability(
+    ssh_hosts: list[Host], timeout: int, *, retries: int = 1, retry_delay: float = 1.5
+) -> dict[str, bool]:
+    """Reachability per host, re-probing the failures to avoid a false 'offline'.
+
+    A single transient SSH hiccup (a slow handshake, a dropped packet) would otherwise
+    fire a *critical* offline push and erode trust in the alerts. So we re-probe only the
+    hosts that failed, up to ``retries`` more times, before believing they're down.
+    """
+    metrics = _probe_all(ssh_hosts, lambda a: probe_system(a, timeout=timeout))
+    reach = {h.name: metrics[h.name].reachable for h in ssh_hosts}  # type: ignore[attr-defined]
+    for _ in range(retries):
+        down = [h for h in ssh_hosts if not reach[h.name]]
+        if not down:
+            break
+        time.sleep(retry_delay)
+        again = _probe_all(down, lambda a: probe_system(a, timeout=timeout))
+        for h in down:
+            if again[h.name].reachable:  # type: ignore[attr-defined]
+                reach[h.name] = True
+    return reach
 
 
 def _check_once(notify_: bool, timeout: int) -> int:
@@ -1294,10 +1427,7 @@ def _check_once(notify_: bool, timeout: int) -> int:
     rows = _assemble_rows(config_hosts, servers, dom_exp, today, discover=True)
 
     ssh_hosts = [h for h in config_hosts if h.ssh.strip()]
-    reach: dict[str, bool] = {}
-    if ssh_hosts:
-        metrics = _probe_all(ssh_hosts, lambda a: probe_system(a, timeout=timeout))
-        reach = {h.name: metrics[h.name].reachable for h in ssh_hosts}  # type: ignore[attr-defined]
+    reach = _probe_reachability(ssh_hosts, timeout) if ssh_hosts else {}
 
     alerts = _evaluate_alerts(rows, accounts, reach, config, today)
 
@@ -1307,6 +1437,8 @@ def _check_once(notify_: bool, timeout: int) -> int:
     if not alerts:
         console.print(indent(Text("✓ all clear", style=OK)))
         console.print()
+        if notify_:
+            _dispatch_notifications(alerts, rows, config)  # may still push a recovery
         for note in notes:
             console.print(indent(meta(note)))
         return 0
@@ -1324,7 +1456,7 @@ def _check_once(notify_: bool, timeout: int) -> int:
     crit = sum(1 for a in alerts if a.crit)
     console.print(indent(meta(f"{len(alerts)} alert(s), {crit} critical")))
     if notify_:
-        _push_alerts(alerts, config)
+        _dispatch_notifications(alerts, rows, config)
     for note in notes:
         console.print(indent(meta(note)))
     return len(alerts)

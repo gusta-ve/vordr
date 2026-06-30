@@ -215,6 +215,16 @@ Thresholds live in `[alerts]` (`runway_days`, default 14; `charge_days`, default
 With `--notify`, alerts are pushed via **ntfy** — no account, just a topic; set
 `[notify] ntfy = "https://ntfy.sh/<topic>"` (or `VORDR_NTFY_URL`).
 
+### Push only when it changes (no alarm fatigue)
+
+On a timer, a standing alert — say a charge seven days out — would otherwise push on every
+single run. `--notify` instead pushes **only when something changes**: when an alert is
+**new**, or when it climbs to a more urgent tier (`upcoming → imminent → due`). A host that
+recovers gets a one-shot `✓ <host> back online`; alerts that simply clear drop out quietly.
+The terminal still shows the full picture on every run — only the *push* is deduplicated.
+The small ledger lives in `~/.cache/vordr/notify-state.json`. (A transient SSH hiccup is
+re-probed before it's ever called offline, so a blip never wakes your phone.)
+
 ### Scheduling — your call, nothing installed for you
 
 `vordr check` runs once and exits; vordr never touches your system scheduler. Pick what

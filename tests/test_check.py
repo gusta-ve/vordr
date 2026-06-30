@@ -94,6 +94,30 @@ def test_merge_notes_dedups_preserving_order():
     assert merged == ["vultr: HTTP 401", "hetzner: no token"]
 
 
+def test_probe_reachability_retries_transient_failure(monkeypatch):
+    # a host that fails the first probe but answers the retry must NOT be flagged offline
+    h = Host(name="web", ssh="web", server=Subscription(provider="Hetzner"))
+    calls = {"web": 0}
+
+    def fake_probe(alias, timeout=20):
+        calls[alias] += 1
+        return SystemMetrics(reachable=calls[alias] >= 2)
+
+    monkeypatch.setattr(cli, "probe_system", fake_probe)
+    monkeypatch.setattr(cli.time, "sleep", lambda _s: None)
+    reach = cli._probe_reachability([h], timeout=5)
+    assert reach == {"web": True}
+    assert calls["web"] == 2  # probed once, retried once
+
+
+def test_probe_reachability_reports_down_after_retries(monkeypatch):
+    h = Host(name="web", ssh="web", server=Subscription(provider="Hetzner"))
+    monkeypatch.setattr(cli, "probe_system", lambda a, timeout=20: SystemMetrics(reachable=False))
+    monkeypatch.setattr(cli.time, "sleep", lambda _s: None)
+    reach = cli._probe_reachability([h], timeout=5, retries=2)
+    assert reach == {"web": False}
+
+
 def test_parse_interval():
     assert cli._parse_interval("30m") == 1800
     assert cli._parse_interval("6h") == 21600
@@ -132,6 +156,124 @@ def test_check_offline_exits_nonzero(monkeypatch, tmp_path):
         cli, "probe_system",
         lambda a, timeout=20: SystemMetrics(reachable=False, error="down"),
     )
+    monkeypatch.setattr(cli.time, "sleep", lambda _s: None)  # don't wait on the retry
     result = runner.invoke(cli.app, ["check"])
     assert result.exit_code == 1
     assert "offline" in result.stdout.lower()
+
+
+def test_urgency_tier():
+    assert cli._urgency_tier(7) == 1
+    assert cli._urgency_tier(2) == 1
+    assert cli._urgency_tier(1) == 2     # imminent
+    assert cli._urgency_tier(0) == 3     # due
+    assert cli._urgency_tier(-3) == 3    # overdue
+
+
+def test_select_to_push_new_then_silent_then_escalation():
+    a1 = cli._Alert(False, "Hetzner", "charge in 7d", key="hetzner:charge", tier=1)
+    push, state = cli._select_to_push([a1], {})
+    assert [a.key for a in push] == ["hetzner:charge"]   # brand new -> pushed
+    assert state == {"hetzner:charge": 1}
+
+    push, state = cli._select_to_push([a1], state)        # same tier -> silent
+    assert push == []
+    assert state == {"hetzner:charge": 1}
+
+    a2 = cli._Alert(False, "Hetzner", "charge in 1d", key="hetzner:charge", tier=2)
+    push, state = cli._select_to_push([a2], state)        # climbed -> pushed again
+    assert [a.key for a in push] == ["hetzner:charge"]
+    assert state == {"hetzner:charge": 2}
+
+
+def test_select_to_push_drops_cleared_alert():
+    state = {"web:offline": 3, "hetzner:charge": 1}
+    a = cli._Alert(False, "Hetzner", "charge in 5d", key="hetzner:charge", tier=1)
+    push, new_state = cli._select_to_push([a], state)
+    assert push == []                          # already pushed at tier 1
+    assert new_state == {"hetzner:charge": 1}  # web:offline cleared -> dropped
+
+
+def test_notify_state_roundtrip(monkeypatch, tmp_path):
+    p = tmp_path / "state.json"
+    monkeypatch.setenv("VORDR_NOTIFY_STATE", str(p))
+    cli._save_notify_state({"a:b": 2})
+    assert cli._load_notify_state() == {"a:b": 2}
+    p.write_text("not json", encoding="utf-8")   # corrupt -> empty, no crash
+    assert cli._load_notify_state() == {}
+
+
+def test_check_notify_dedups_repeat(monkeypatch, tmp_path):
+    # a server whose renewal is long overdue -> a standing alert on every run
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[hosts.box]\nssh = ""\n  [hosts.box.server]\n'
+        '  provider = "Hetzner"\n  expires = "2000-01-01"\n'
+        '[notify]\nntfy = "https://ntfy.sh/x"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("VORDR_CONFIG", str(path))
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setenv("VORDR_NOTIFY_STATE", str(tmp_path / "state.json"))
+    monkeypatch.setenv("VORDR_SECRETS", str(tmp_path / "secrets.toml"))
+    monkeypatch.delenv("HCLOUD_TOKEN", raising=False)
+    monkeypatch.delenv("VULTR_API_KEY", raising=False)
+    monkeypatch.setattr(cli.secrets, "get_token", lambda p: None)
+    monkeypatch.setattr(cli, "_resolve_domain_expiries", lambda *a, **k: {})
+    sent: list[int] = []
+    monkeypatch.setattr(cli.notify, "send", lambda *a, **k: (sent.append(1) or ["ntfy"]))
+
+    r1 = runner.invoke(cli.app, ["check", "--notify"])    # new alert -> push
+    r2 = runner.invoke(cli.app, ["check", "--notify"])    # same alert -> quiet
+    assert r1.exit_code == 1 and r2.exit_code == 1
+    assert len(sent) == 1                                  # pushed once, deduped the repeat
+    assert "no change since last push" in r2.stdout.lower()
+
+
+def test_recovered_offline_only_for_offline_keys():
+    state = {"nexus:offline": 3, "hetzner:charge": 1}
+    rec = cli._recovered_offline([], state, {"nexus": "Nexus"})
+    assert [(a.who, a.text, a.tier) for a in rec] == [("Nexus", "back online", 0)]
+    # a charge clearing is NOT a recovery; an offline that still stands is NOT either
+    still = cli._Alert(True, "Nexus", "offline (unreachable)", key="nexus:offline", tier=3)
+    assert cli._recovered_offline([still], state, {"nexus": "Nexus"}) == []
+
+
+def test_check_notify_offline_then_recovery(monkeypatch, tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[hosts.box]\nssh = "box"\n  [hosts.box.server]\n  provider = "Hetzner"\n'
+        '[notify]\nntfy = "https://ntfy.sh/x"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("VORDR_CONFIG", str(path))
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setenv("VORDR_NOTIFY_STATE", str(tmp_path / "state.json"))
+    monkeypatch.setenv("VORDR_SECRETS", str(tmp_path / "secrets.toml"))
+    monkeypatch.delenv("HCLOUD_TOKEN", raising=False)
+    monkeypatch.delenv("VULTR_API_KEY", raising=False)
+    monkeypatch.setattr(cli.secrets, "get_token", lambda p: None)
+    monkeypatch.setattr(cli, "_resolve_domain_expiries", lambda *a, **k: {})
+    monkeypatch.setattr(cli.time, "sleep", lambda _s: None)
+    bodies: list[str] = []
+
+    def fake_send(title, body, **k):
+        bodies.append(body)
+        return ["ntfy"]
+
+    monkeypatch.setattr(cli.notify, "send", fake_send)
+
+    reachable = {"v": False}
+    monkeypatch.setattr(
+        cli, "probe_system", lambda a, timeout=20: SystemMetrics(reachable=reachable["v"])
+    )
+
+    r1 = runner.invoke(cli.app, ["check", "--notify"])    # offline -> push
+    reachable["v"] = True
+    runner.invoke(cli.app, ["check", "--notify"])         # back online -> recovery push
+    r3 = runner.invoke(cli.app, ["check", "--notify"])    # clear, ledger empty -> nothing
+
+    assert r1.exit_code == 1 and r3.exit_code == 0
+    assert len(bodies) == 2
+    assert "offline" in bodies[0].lower()
+    assert "back online" in bodies[1].lower()

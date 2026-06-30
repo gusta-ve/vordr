@@ -3,6 +3,21 @@
 All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.10.0]
+
+### Changed
+- **`vordr check --notify` only pushes on change.** Standing alerts no longer re-push on
+  every run — a notification fires when an alert is *new* or climbs to a more urgent tier
+  (upcoming → imminent → due). The ledger lives in `~/.cache/vordr/notify-state.json`. The
+  terminal still prints the full picture every time; only the push is deduplicated.
+
+### Added
+- **Recovery push for offline hosts.** When a host that was offline answers again, you get
+  a one-shot `✓ <host> back online` — the relief after the alarm. Cleared charge/domain/
+  runway alerts drop out quietly.
+- **Transient-failure tolerance.** A host that fails the first SSH probe is re-probed
+  before being declared offline, so a momentary hiccup never fires a false critical push.
+
 ## [0.9.1]
 
 ### Fixed
