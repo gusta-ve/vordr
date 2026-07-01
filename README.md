@@ -25,6 +25,10 @@ the questions that matter day to day:
 No agents installed on the servers, no database, no secrets in the code and **no
 third-party dependencies** (pure standard library): Vordr only needs your `~/.ssh/config`.
 
+**Vordr itself runs anywhere** — any machine with Python 3.11+ and an SSH client (Linux,
+macOS, or Windows with OpenSSH). Only the **hosts it watches** need to be Linux, since the
+metric probes read `/proc`, `df`, `ss` and friends over SSH.
+
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │ Vordr · server status                                                  │
@@ -52,7 +56,9 @@ mode that reproduces the native output of a `status_command` of yours, when you 
 
 ## Install
 
-Requires Python 3.11+ and the `ssh` client configured with the hosts you want to watch.
+Runs on any OS with **Python 3.11+** and an `ssh` client — Linux, macOS, or Windows with
+OpenSSH. Nothing else to install (no third-party packages). The hosts you point it at are
+addressed purely as aliases in your `~/.ssh/config`.
 
 ```bash
 pipx install vordr          # recommended (isolated tool on PATH)
@@ -62,8 +68,11 @@ pip install -e ".[dev]"
 
 ## Quick start (just a token)
 
-For cost and billing you **don't need to configure anything**: give a provider token
-and Vordr **discovers your account's servers** on its own.
+Vordr works with **any host from any provider** — you list it in the config (an SSH alias,
+optionally a pinned price) and everything else is generic (SSH, RDAP). On top of that, two
+providers have a **built-in integration** that auto-discovers your servers and their
+cost/age, so for cost and billing you **don't need to configure anything**: just drop a
+token. Adding another provider is one small module (see `hetzner.py`/`vultr.py`).
 
 ```bash
 vordr secret set hetzner   # or: vordr secret set vultr
@@ -166,8 +175,9 @@ for promo/legacy prices):
 - **Server:** with `provider = "Hetzner"` or `"Vultr"` and a token configured, the
   `since` (creation date) and the **monthly cost** come from the **provider's API**.
 
-Supported providers: **Hetzner** (`HCLOUD_TOKEN`) and **Vultr** (`VULTR_API_KEY`).
-Tokens never live in the repository: they're read from an environment variable or from
+Providers with a built-in auto-discovery integration: **Hetzner** (`HCLOUD_TOKEN`) and
+**Vultr** (`VULTR_API_KEY`) — any other host still works, you just set its price/dates in the
+config. Tokens never live in the repository: they're read from an environment variable or from
 `~/.config/vordr/secrets.toml` (chmod 600, in `.gitignore`), with env taking precedence.
 Configure with `vordr secret set <provider>`. Values coming from the network are tagged
 with `(API)` / `(RDAP)`.
