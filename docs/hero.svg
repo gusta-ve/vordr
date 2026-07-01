@@ -1,48 +1,48 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="500" viewBox="0 0 1120 500" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="480" viewBox="0 0 1120 480" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">
 <defs><linearGradient id="wm" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#dbe6f3"/><stop offset="1" stop-color="#3a4d68"/></linearGradient></defs>
-<rect width="1120" height="500" rx="14" fill="#0b0d10" stroke="#1c2128"/>
+<rect width="1120" height="480" rx="14" fill="#0b0d10" stroke="#1c2128"/>
 <text x="56" y="190" font-size="100" font-weight="800" fill="url(#wm)" letter-spacing="1">vordr</text>
 <text x="62" y="230" font-size="20" fill="#8b949e" xml:space="preserve">the warden of your servers</text>
-<text x="62" y="300" font-size="15" fill="#6e7681" xml:space="preserve">no agents · no database · just your ~/.ssh/config</text>
-<text x="62" y="360" font-size="18" fill="#6e7681" xml:space="preserve">$</text>
-<text x="84" y="360" font-size="18" fill="#9cb4d6" xml:space="preserve">pipx install vordr</text>
-<text x="62" y="472" font-size="13" fill="#6e7681" xml:space="preserve">gusta-ve · github.com/gusta-ve/vordr · Vörðr, the Norse guardian spirit</text>
-<rect x="560" y="64" width="524" height="200" rx="10" fill="#0d1117" stroke="#1c2128"/>
-<circle cx="580" cy="84" r="5" fill="#3a4150"/>
-<circle cx="598" cy="84" r="5" fill="#3a4150"/>
-<circle cx="616" cy="84" r="5" fill="#3a4150"/>
-<text x="582" y="114" font-size="16" fill="#9cb4d6" font-weight="700" xml:space="preserve">vordr</text>
-<text x="630.5" y="114" font-size="16" fill="#8b949e" xml:space="preserve">  ·  server status</text>
-<line x1="582" y1="126" x2="1062" y2="126" stroke="#1c2128"/>
-<text x="582.0" y="148" font-size="16" fill="#8b949e" xml:space="preserve">host</text>
-<text x="669.3" y="148" font-size="16" fill="#8b949e" xml:space="preserve">state</text>
-<text x="795.4" y="148" font-size="16" fill="#8b949e" xml:space="preserve">uptime</text>
-<text x="902.1" y="148" font-size="16" fill="#8b949e" xml:space="preserve">ram</text>
-<text x="970.0" y="148" font-size="16" fill="#8b949e" xml:space="preserve">disk</text>
-<text x="582.0" y="176" font-size="16" fill="#c9d1d9" xml:space="preserve">web</text>
-<circle cx="673.3" cy="171" r="4" fill="#5fbf73"/>
-<text x="685.3" y="176" font-size="16" fill="#5fbf73" xml:space="preserve">online</text>
-<text x="795.4" y="176" font-size="16" fill="#c9d1d9" xml:space="preserve">2w 5d</text>
-<text x="902.1" y="176" font-size="16" fill="#c9d1d9" xml:space="preserve">32%</text>
-<text x="970.0" y="176" font-size="16" fill="#c9d1d9" xml:space="preserve">22%</text>
-<text x="582.0" y="204" font-size="16" fill="#c9d1d9" xml:space="preserve">db</text>
-<circle cx="673.3" cy="199" r="4" fill="#5fbf73"/>
-<text x="685.3" y="204" font-size="16" fill="#5fbf73" xml:space="preserve">online</text>
-<text x="795.4" y="204" font-size="16" fill="#c9d1d9" xml:space="preserve">4w 4d</text>
-<text x="902.1" y="204" font-size="16" fill="#c9d1d9" xml:space="preserve">18%</text>
-<text x="970.0" y="204" font-size="16" fill="#c9d1d9" xml:space="preserve">62%</text>
-<text x="582" y="238" font-size="16" fill="#6e7681" xml:space="preserve">total  EUR 4.99 + USD 60.00  ·  credit ~57d left</text>
-<rect x="560" y="286" width="524" height="178" rx="10" fill="#0d1117" stroke="#1c2128"/>
-<circle cx="580" cy="306" r="5" fill="#3a4150"/>
-<circle cx="598" cy="306" r="5" fill="#3a4150"/>
-<circle cx="616" cy="306" r="5" fill="#3a4150"/>
-<text x="582" y="336" font-size="16" fill="#9cb4d6" font-weight="700" xml:space="preserve">vordr</text>
-<text x="630.5" y="336" font-size="16" fill="#8b949e" xml:space="preserve">  ·  check  ·  1 critical · 1 alert · 1 recovered</text>
-<line x1="582" y1="348" x2="1062" y2="348" stroke="#1c2128"/>
-<text x="582" y="398" font-size="16" fill="#e5675f" font-weight="700" xml:space="preserve">[!!]</text>
-<text x="630.5" y="398" font-size="16" fill="#c9d1d9" xml:space="preserve">db · domain expired (2026-06-28)</text>
-<text x="582" y="426" font-size="16" fill="#d6a050" font-weight="700" xml:space="preserve">[!]</text>
-<text x="630.5" y="426" font-size="16" fill="#c9d1d9" xml:space="preserve">Hetzner · charge in 6d (~ EUR 4.99)</text>
-<text x="582" y="454" font-size="16" fill="#5fbf73" font-weight="700" xml:space="preserve">[+]</text>
-<text x="630.5" y="454" font-size="16" fill="#c9d1d9" xml:space="preserve">web · back online</text>
+<text x="62" y="302" font-size="15" fill="#6e7681" xml:space="preserve">no agents · no database · just your ~/.ssh/config</text>
+<text x="62" y="362" font-size="18" fill="#6e7681" xml:space="preserve">$</text>
+<text x="84" y="362" font-size="18" fill="#9cb4d6" xml:space="preserve">pipx install vordr</text>
+<text x="62" y="454" font-size="13" fill="#6e7681" xml:space="preserve">gusta-ve · github.com/gusta-ve/vordr</text>
+<rect x="560" y="52" width="524" height="196" rx="10" fill="#0d1117" stroke="#1c2128"/>
+<circle cx="580" cy="72" r="5" fill="#3a4150"/>
+<circle cx="598" cy="72" r="5" fill="#3a4150"/>
+<circle cx="616" cy="72" r="5" fill="#3a4150"/>
+<text x="582" y="102" font-size="16" fill="#9cb4d6" font-weight="700" xml:space="preserve">vordr</text>
+<text x="630.5" y="102" font-size="16" fill="#8b949e" xml:space="preserve">  ·  server status</text>
+<line x1="582" y1="114" x2="1062" y2="114" stroke="#1c2128"/>
+<text x="582.0" y="136" font-size="16" fill="#8b949e" xml:space="preserve">host</text>
+<text x="669.3" y="136" font-size="16" fill="#8b949e" xml:space="preserve">state</text>
+<text x="795.4" y="136" font-size="16" fill="#8b949e" xml:space="preserve">uptime</text>
+<text x="902.1" y="136" font-size="16" fill="#8b949e" xml:space="preserve">ram</text>
+<text x="970.0" y="136" font-size="16" fill="#8b949e" xml:space="preserve">disk</text>
+<text x="582.0" y="164" font-size="16" fill="#c9d1d9" xml:space="preserve">web</text>
+<circle cx="673.3" cy="159" r="4" fill="#5fbf73"/>
+<text x="685.3" y="164" font-size="16" fill="#5fbf73" xml:space="preserve">online</text>
+<text x="795.4" y="164" font-size="16" fill="#c9d1d9" xml:space="preserve">2w 5d</text>
+<text x="902.1" y="164" font-size="16" fill="#c9d1d9" xml:space="preserve">32%</text>
+<text x="970.0" y="164" font-size="16" fill="#c9d1d9" xml:space="preserve">22%</text>
+<text x="582.0" y="192" font-size="16" fill="#c9d1d9" xml:space="preserve">db</text>
+<circle cx="673.3" cy="187" r="4" fill="#5fbf73"/>
+<text x="685.3" y="192" font-size="16" fill="#5fbf73" xml:space="preserve">online</text>
+<text x="795.4" y="192" font-size="16" fill="#c9d1d9" xml:space="preserve">4w 4d</text>
+<text x="902.1" y="192" font-size="16" fill="#c9d1d9" xml:space="preserve">18%</text>
+<text x="970.0" y="192" font-size="16" fill="#c9d1d9" xml:space="preserve">62%</text>
+<text x="582" y="224" font-size="16" fill="#6e7681" xml:space="preserve">total  EUR 4.99 + USD 60.00 / month</text>
+<rect x="560" y="264" width="524" height="196" rx="10" fill="#0d1117" stroke="#1c2128"/>
+<circle cx="580" cy="284" r="5" fill="#3a4150"/>
+<circle cx="598" cy="284" r="5" fill="#3a4150"/>
+<circle cx="616" cy="284" r="5" fill="#3a4150"/>
+<text x="582" y="314" font-size="16" fill="#9cb4d6" font-weight="700" xml:space="preserve">vordr</text>
+<text x="630.5" y="314" font-size="16" fill="#8b949e" xml:space="preserve">  ·  check</text>
+<line x1="582" y1="326" x2="1062" y2="326" stroke="#1c2128"/>
+<text x="582" y="348" font-size="16" fill="#e5675f" font-weight="700" xml:space="preserve">[!!]</text>
+<text x="630.5" y="348" font-size="16" fill="#c9d1d9" xml:space="preserve">db · domain expired (2026-06-28)</text>
+<text x="582" y="382" font-size="16" fill="#d6a050" font-weight="700" xml:space="preserve">[!]</text>
+<text x="630.5" y="382" font-size="16" fill="#c9d1d9" xml:space="preserve">Hetzner · charge in 6d (~ EUR 4.99)</text>
+<text x="582" y="416" font-size="16" fill="#5fbf73" font-weight="700" xml:space="preserve">[+]</text>
+<text x="630.5" y="416" font-size="16" fill="#c9d1d9" xml:space="preserve">web · back online</text>
 </svg>
