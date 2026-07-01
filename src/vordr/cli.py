@@ -408,6 +408,29 @@ def secret_set(
     )
 
 
+@secret_app.command("rm")
+def secret_rm(
+    provider: str = typer.Argument(..., help=f"One of: {', '.join(secrets.ENV_VARS)}."),
+) -> None:
+    """Remove a provider's API token from ~/.config/vordr/secrets.toml."""
+    provider = provider.lower()
+    if provider not in secrets.ENV_VARS:
+        err_console.print(
+            f"[red]unknown provider:[/] {provider} "
+            f"(known: {', '.join(secrets.ENV_VARS)})"
+        )
+        raise typer.Exit(2)
+    if secrets.remove_token(provider):
+        console.print(f"[green]✔[/] removed [bold]{provider}[/] token from "
+                      f"[bold]{secrets.secrets_path()}[/]")
+    else:
+        console.print(indent(meta(f"no {provider} token in the file — nothing to remove")))
+    env = secrets.ENV_VARS[provider]
+    if os.environ.get(env, "").strip():
+        console.print(indent(meta(
+            f"note: {env} is still set in the environment and takes precedence")))
+
+
 @secret_app.command("status")
 def secret_status() -> None:
     """Show which providers have a token configured (without revealing it)."""

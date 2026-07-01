@@ -3,6 +3,14 @@
 All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.2.0]
+
+### Added
+- **`vordr secret rm <provider>`** — remove a stored API token from the secrets file, so you
+  can retire or rotate a provider without hand-editing `secrets.toml`. Rounds out
+  `secret set`/`status`. An environment variable still takes precedence and is left untouched
+  (the command says so).
+
 ## [1.1.0]
 
 ### Changed

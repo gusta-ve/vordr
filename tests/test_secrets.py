@@ -37,6 +37,24 @@ def test_set_token_preserves_other_providers(monkeypatch, tmp_path):
     assert secrets.get_token("vultr") == "v-token"
 
 
+def test_remove_token(monkeypatch, tmp_path):
+    monkeypatch.setenv("VORDR_SECRETS", str(tmp_path / "secrets.toml"))
+    monkeypatch.delenv("HCLOUD_TOKEN", raising=False)
+    monkeypatch.delenv("VULTR_API_KEY", raising=False)
+    secrets.set_token("hetzner", "h-token")
+    secrets.set_token("vultr", "v-token")
+    assert secrets.remove_token("vultr") is True
+    assert secrets.get_token("vultr") is None          # gone
+    assert secrets.get_token("hetzner") == "h-token"   # the other one stays
+    # removing again (or an absent provider) reports nothing to remove
+    assert secrets.remove_token("vultr") is False
+
+
+def test_remove_token_missing_file(monkeypatch, tmp_path):
+    monkeypatch.setenv("VORDR_SECRETS", str(tmp_path / "nope.toml"))
+    assert secrets.remove_token("hetzner") is False
+
+
 def test_mask():
     assert secrets.mask("abcd1234efgh") == "abcd…efgh"
     assert secrets.mask("short") == "•••••"

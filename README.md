@@ -145,6 +145,7 @@ vordr hosts               # lists what's configured
 
 vordr secret set hetzner  # stores the API token (chmod 600, outside the repo)
 vordr secret status       # shows which providers have a token (masked)
+vordr secret rm vultr     # removes a stored token (env var, if set, still wins)
 ```
 
 All colors follow thresholds: green (ok), yellow (attention), red (critical) — for

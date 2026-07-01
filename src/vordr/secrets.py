@@ -64,14 +64,8 @@ def token_source(provider: str) -> str | None:
     return None
 
 
-def set_token(provider: str, token: str) -> Path:
-    """Write the token to the secrets file (chmod 600). Returns the path."""
-    provider = provider.lower()
-    data = _load()
-    tokens = data.get("tokens", {})
-    if not isinstance(tokens, dict):
-        tokens = {}
-    tokens[provider] = token.strip()
+def _write_tokens(tokens: dict) -> Path:
+    """(Over)write the secrets file with ``tokens`` (chmod 600). Returns the path."""
     path = secrets_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = ["# Vordr secrets — DO NOT commit. Manage with `vordr secret`.", "", "[tokens]"]
@@ -81,6 +75,33 @@ def set_token(provider: str, token: str) -> Path:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     path.chmod(0o600)
     return path
+
+
+def set_token(provider: str, token: str) -> Path:
+    """Write the token to the secrets file (chmod 600). Returns the path."""
+    provider = provider.lower()
+    data = _load()
+    tokens = data.get("tokens", {})
+    if not isinstance(tokens, dict):
+        tokens = {}
+    tokens[provider] = token.strip()
+    return _write_tokens(tokens)
+
+
+def remove_token(provider: str) -> bool:
+    """Delete a provider's token from the secrets file. True if one was actually there.
+
+    Only touches the file; an ``ENV_VARS`` environment variable still wins and can't be
+    unset from here (the caller warns about that).
+    """
+    provider = provider.lower()
+    data = _load()
+    tokens = data.get("tokens", {})
+    if not isinstance(tokens, dict) or provider not in tokens:
+        return False
+    del tokens[provider]
+    _write_tokens(tokens)
+    return True
 
 
 def mask(token: str) -> str:

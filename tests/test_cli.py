@@ -428,6 +428,31 @@ def test_secret_set_unknown_provider(monkeypatch, tmp_path):
     assert result.exit_code == 2
 
 
+def test_secret_rm_removes_token(monkeypatch, tmp_path):
+    _isolate_secrets(monkeypatch, tmp_path)
+    monkeypatch.delenv("VULTR_API_KEY", raising=False)
+    cli.secrets.set_token("vultr", "v-token")
+    result = runner.invoke(cli.app, ["secret", "rm", "vultr"])
+    assert result.exit_code == 0
+    assert "removed" in result.stdout.lower()
+    assert cli.secrets.get_token("vultr") is None
+    assert "v-token" not in (tmp_path / "secrets.toml").read_text()
+
+
+def test_secret_rm_absent_is_soft(monkeypatch, tmp_path):
+    _isolate_secrets(monkeypatch, tmp_path)
+    monkeypatch.delenv("HCLOUD_TOKEN", raising=False)
+    result = runner.invoke(cli.app, ["secret", "rm", "hetzner"])
+    assert result.exit_code == 0
+    assert "nothing to remove" in result.stdout.lower()
+
+
+def test_secret_rm_unknown_provider(monkeypatch, tmp_path):
+    _isolate_secrets(monkeypatch, tmp_path)
+    result = runner.invoke(cli.app, ["secret", "rm", "aws"])
+    assert result.exit_code == 2
+
+
 def test_init_creates_config(monkeypatch, tmp_path):
     path = tmp_path / "config.toml"
     monkeypatch.setenv("VORDR_CONFIG", str(path))
