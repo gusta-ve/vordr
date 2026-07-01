@@ -73,10 +73,13 @@ def main() -> None:
         '<stop offset="0" stop-color="#dbe6f3"/><stop offset="1" stop-color="#3a4d68"/>'
         '</linearGradient></defs>',
         f'<rect width="{W}" height="{H}" rx="14" fill="{BG}" stroke="{EDGE}"/>',
-        # wordmark + tagline + signature (left column)
-        f'<text x="56" y="208" font-size="104" font-weight="800" fill="url(#wm)" '
+        # wordmark + tagline + hook + install (left column)
+        f'<text x="56" y="190" font-size="100" font-weight="800" fill="url(#wm)" '
         f'letter-spacing="1">{esc(NAME)}</text>',
-        text(62, 250, TAGLINE, MUTED, size=20),
+        text(62, 230, TAGLINE, MUTED, size=20),
+        text(62, 300, "no agents · no database · just your ~/.ssh/config", DIM, size=15),
+        text(62, 360, "$", DIM, size=18),
+        text(84, 360, "pipx install vordr", ACCENT, size=18),
         text(62, H - 28, SIG, DIM, size=13),
     ]
     x_end = RX + RW - PAD

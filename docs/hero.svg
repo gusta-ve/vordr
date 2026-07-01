@@ -1,8 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1120" height="500" viewBox="0 0 1120 500" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">
 <defs><linearGradient id="wm" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#dbe6f3"/><stop offset="1" stop-color="#3a4d68"/></linearGradient></defs>
 <rect width="1120" height="500" rx="14" fill="#0b0d10" stroke="#1c2128"/>
-<text x="56" y="208" font-size="104" font-weight="800" fill="url(#wm)" letter-spacing="1">vordr</text>
-<text x="62" y="250" font-size="20" fill="#8b949e" xml:space="preserve">the warden of your servers</text>
+<text x="56" y="190" font-size="100" font-weight="800" fill="url(#wm)" letter-spacing="1">vordr</text>
+<text x="62" y="230" font-size="20" fill="#8b949e" xml:space="preserve">the warden of your servers</text>
+<text x="62" y="300" font-size="15" fill="#6e7681" xml:space="preserve">no agents · no database · just your ~/.ssh/config</text>
+<text x="62" y="360" font-size="18" fill="#6e7681" xml:space="preserve">$</text>
+<text x="84" y="360" font-size="18" fill="#9cb4d6" xml:space="preserve">pipx install vordr</text>
 <text x="62" y="472" font-size="13" fill="#6e7681" xml:space="preserve">gusta-ve · github.com/gusta-ve/vordr · Vörðr, the Norse guardian spirit</text>
 <rect x="560" y="64" width="524" height="200" rx="10" fill="#0d1117" stroke="#1c2128"/>
 <circle cx="580" cy="84" r="5" fill="#3a4150"/>

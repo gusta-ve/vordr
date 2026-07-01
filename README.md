@@ -1,7 +1,12 @@
-# Vordr 🐺
+<p align="center">
+  <img src="https://raw.githubusercontent.com/gusta-ve/vordr/main/docs/hero.svg" alt="vordr — the warden of your servers" width="900">
+</p>
 
 <p align="center">
-  <img src="docs/hero.svg" alt="vordr — the warden of your servers" width="900">
+  <a href="https://pypi.org/project/vordr/"><img src="https://img.shields.io/pypi/v/vordr?color=9cb4d6&label=pypi" alt="PyPI"></a>
+  <a href="https://github.com/gusta-ve/vordr/actions/workflows/ci.yml"><img src="https://github.com/gusta-ve/vordr/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/python-3.11%2B-9cb4d6" alt="Python 3.11+">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-9cb4d6" alt="MIT"></a>
 </p>
 
 > _In Norse lore, the **Vörðr** is the guardian spirit that follows each person from

@@ -3,6 +3,14 @@
 All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.2.1]
+
+### Changed
+- Refreshed the README hero: a balanced two-panel layout with the tagline, the
+  `no agents · no database` hook and the install command on the left, the `status`/`check`
+  demos on the right. The hero image now uses an absolute URL so it renders on the PyPI page
+  too, and the README gained PyPI/CI/Python/license badges.
+
 ## [1.2.0]
 
 ### Added
