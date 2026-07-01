@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import argparse
+import getpass
 import json
 import os
 import secrets as pysecrets
@@ -13,12 +15,6 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
-
-import typer
-from rich.console import Group
-from rich.live import Live
-from rich.table import Table
-from rich.text import Text
 
 from . import __version__, hetzner, notify, providers, rdap, secrets, ssh, vultr
 from .config import Config, ConfigError, Host, Subscription, config_path, load
@@ -32,15 +28,61 @@ from .format import (
     pct_style,
 )
 from .probe import SecurityMetrics, SystemMetrics, probe_security, probe_system
-from .ui import ACCENT, MUTED, OK, brand, card, console, err_console, grid, indent, kv, meta
-
-app = typer.Typer(
-    name="vordr",
-    help="Vordr — the warden of your servers. Watches status, resources, "
-    "cost/expiry and security of your hosts over SSH.",
-    add_completion=False,
-    context_settings={"help_option_names": ["-h", "--help"]},
+from .ui import (
+    ACCENT,
+    MUTED,
+    OK,
+    Group,
+    Live,
+    Table,
+    Text,
+    brand,
+    card,
+    console,
+    err_console,
+    grid,
+    indent,
+    kv,
+    meta,
 )
+
+
+class Exit(Exception):  # noqa: N818 — a control-flow signal, not an error
+    """Unwind to ``main`` and exit with ``code`` (stdlib stand-in for typer.Exit)."""
+
+    def __init__(self, code: int = 0) -> None:
+        self.code = code
+
+
+class BadParameter(Exception):  # noqa: N818
+    """A bad option/argument value; ``main`` turns it into a code-2 exit."""
+
+
+def prompt(text: str, *, default=None, hide_input: bool = False, show_default: bool = True):
+    """Ask for a line of input (stdlib stand-in for typer.prompt)."""
+    suffix = f" [{default}]" if (default not in (None, "") and show_default and not hide_input) \
+        else ""
+    sys.stdout.write(f"{text}{suffix}: ")
+    sys.stdout.flush()
+    if hide_input and sys.stdin.isatty():
+        value = getpass.getpass("")
+    else:
+        line = sys.stdin.readline()
+        value = line.rstrip("\n") if line else ""
+    if value == "" and default is not None:
+        return default
+    return value
+
+
+def confirm(text: str, *, default: bool = False) -> bool:
+    """Ask a yes/no question (stdlib stand-in for typer.confirm)."""
+    sys.stdout.write(f"{text} [{'Y/n' if default else 'y/N'}]: ")
+    sys.stdout.flush()
+    line = sys.stdin.readline()
+    answer = line.strip().lower()
+    if answer == "":
+        return default
+    return answer in ("y", "yes")
 
 CONFIG_TEMPLATE = """\
 # Vordr configuration — ~/.config/vordr/config.toml
@@ -77,13 +119,13 @@ def _load_config(*, require_hosts: bool = True) -> Config:
         config = load()
     except ConfigError as exc:
         err_console.print(f"[bold red]config error:[/] {exc}")
-        raise typer.Exit(2) from exc
+        raise Exit(2) from exc
     if require_hosts and not config.hosts:
         console.print(
             "[yellow]No hosts configured.[/] Run [bold]vordr init[/] and edit "
             f"{config.source or config_path()}."
         )
-        raise typer.Exit(0)
+        raise Exit(0)
     return config
 
 
@@ -93,7 +135,7 @@ def _select_hosts(config: Config, host: str | None) -> list[Host]:
             return [config.host(host)]
         except ConfigError as exc:
             err_console.print(f"[bold red]{exc}[/]")
-            raise typer.Exit(2) from exc
+            raise Exit(2) from exc
     return list(config.hosts.values())
 
 
@@ -166,7 +208,6 @@ def _splash() -> None:
 
 # --- commands --------------------------------------------------------------
 
-@app.command()
 def hosts() -> None:
     """List the configured hosts (without contacting them)."""
     config = _load_config()
@@ -192,10 +233,7 @@ def _is_interactive() -> bool:
     return sys.stdin.isatty()
 
 
-@app.command()
-def init(
-    force: bool = typer.Option(False, "--force", "-f", help="Overwrite an existing config."),
-) -> None:
+def init(force: bool = False) -> None:
     """Create the config. In a terminal, becomes a wizard that imports your servers.
 
     With a saved token, ``init`` lists the account's servers and builds the config for
@@ -205,14 +243,14 @@ def init(
     path = config_path()
     interactive = _is_interactive()
     if path.exists() and not force:
-        overwrite = interactive and typer.confirm(
+        overwrite = interactive and confirm(
             f"{path} already exists. Overwrite?", default=False
         )
         if not overwrite:
             err_console.print(
                 f"[yellow]already exists:[/] {path}\nUse [bold]--force[/] to overwrite."
             )
-            raise typer.Exit(1)
+            raise Exit(1)
 
     blocks = _wizard_import() if interactive else []
     content = _render_config(blocks) if blocks else CONFIG_TEMPLATE
@@ -288,7 +326,7 @@ def _wizard_import() -> list[str]:
     tokened = [p for p in _PROVIDER_CLIENTS if secrets.get_token(p)]
     if not tokened:
         console.print("[dim]No provider token saved.[/]")
-        choice = typer.prompt(
+        choice = prompt(
             f"Set one now? Provider ({'/'.join(secrets.ENV_VARS)}) or enter to skip",
             default="",
             show_default=False,
@@ -318,15 +356,15 @@ def _wizard_import() -> list[str]:
     used: set[str] = set()
     for prov in sorted(discovered):
         for name, sb in sorted(discovered[prov].items()):
-            if not typer.confirm(f"  import '{name}' ({prov.capitalize()})?", default=True):
+            if not confirm(f"  import '{name}' ({prov.capitalize()})?", default=True):
                 continue
             suggestion = _suggest_alias(name, aliases)
             if suggestion:
-                alias = typer.prompt(
+                alias = prompt(
                     "    SSH alias (for status/resources)", default=suggestion
                 ).strip()
             else:
-                alias = typer.prompt(
+                alias = prompt(
                     "    SSH alias (enter if none — cost/billing only)",
                     default="",
                     show_default=False,
@@ -336,7 +374,7 @@ def _wizard_import() -> list[str]:
                 if sb.cost_gross is not None
                 else "unknown"
             )
-            cost_in = typer.prompt(
+            cost_in = prompt(
                 f"    fixed price/mo? (enter = use the API: {api_hint})",
                 default="",
                 show_default=False,
@@ -352,17 +390,12 @@ def _wizard_import() -> list[str]:
     return blocks
 
 
-secret_app = typer.Typer(
-    help="Manage provider API tokens — stored outside the repository.",
-    no_args_is_help=True,
-)
-app.add_typer(secret_app, name="secret")
 
 
 def _store_token_flow(provider: str) -> bool:
     """Prompt, validate (one API read) and store the token. True if stored."""
     # default="" so an empty enter aborts cleanly instead of trapping Click in a re-prompt loop
-    token = typer.prompt(f"API token ({provider})", hide_input=True,
+    token = prompt(f"API token ({provider})", hide_input=True,
                          default="", show_default=False).strip()
     if not token:
         err_console.print("[red]empty token.[/]")
@@ -388,10 +421,7 @@ def _store_token_flow(provider: str) -> bool:
     return True
 
 
-@secret_app.command("set")
-def secret_set(
-    provider: str = typer.Argument(..., help=f"One of: {', '.join(secrets.ENV_VARS)}."),
-) -> None:
+def secret_set(provider: str) -> None:
     """Save (and validate) a provider's API token in ~/.config/vordr/secrets.toml."""
     provider = provider.lower()
     if provider not in secrets.ENV_VARS:
@@ -399,19 +429,16 @@ def secret_set(
             f"[red]unknown provider:[/] {provider} "
             f"(known: {', '.join(secrets.ENV_VARS)})"
         )
-        raise typer.Exit(2)
+        raise Exit(2)
     if not _store_token_flow(provider):
-        raise typer.Exit(1)
+        raise Exit(1)
     console.print(
         f"[dim]the {secrets.ENV_VARS[provider]} environment variable takes precedence "
         f"over the file, if set.[/dim]"
     )
 
 
-@secret_app.command("rm")
-def secret_rm(
-    provider: str = typer.Argument(..., help=f"One of: {', '.join(secrets.ENV_VARS)}."),
-) -> None:
+def secret_rm(provider: str) -> None:
     """Remove a provider's API token from ~/.config/vordr/secrets.toml."""
     provider = provider.lower()
     if provider not in secrets.ENV_VARS:
@@ -419,7 +446,7 @@ def secret_rm(
             f"[red]unknown provider:[/] {provider} "
             f"(known: {', '.join(secrets.ENV_VARS)})"
         )
-        raise typer.Exit(2)
+        raise Exit(2)
     if secrets.remove_token(provider):
         console.print(f"[green]✔[/] removed [bold]{provider}[/] token from "
                       f"[bold]{secrets.secrets_path()}[/]")
@@ -431,7 +458,6 @@ def secret_rm(
             f"note: {env} is still set in the environment and takes precedence")))
 
 
-@secret_app.command("status")
 def secret_status() -> None:
     """Show which providers have a token configured (without revealing it)."""
     table = grid("provider", "source", "token")
@@ -502,22 +528,12 @@ def _build_status_table(
     return Group(Text(), indent(brand("server status")), Text(), indent(table))
 
 
-@app.command()
-def status(
-    host: str = typer.Argument(None, help="Specific host (default: all)."),
-    raw: bool = typer.Option(
-        False, "--raw", help="Show the host's native status_command output."
-    ),
-    watch: float = typer.Option(
-        0, "--watch", "-w", help="Refresh every N seconds (0 = once)."
-    ),
-    timeout: int = typer.Option(ssh.DEFAULT_TIMEOUT, help="SSH timeout per host (s)."),
-) -> None:
+def status(host=None, raw=False, watch=0.0, timeout=ssh.DEFAULT_TIMEOUT) -> None:
     """Status board: state, uptime, load, RAM, disk, containers and expiry."""
     config = _load_config()
     selected = _require_ssh(_select_hosts(config, host))
     if not selected:
-        raise typer.Exit(0)
+        raise Exit(0)
 
     if raw:
         for h in selected:
@@ -546,16 +562,12 @@ def status(
         console.print(render())
 
 
-@app.command()
-def resources(
-    host: str = typer.Argument(None, help="Specific host (default: all)."),
-    timeout: int = typer.Option(ssh.DEFAULT_TIMEOUT, help="SSH timeout per host (s)."),
-) -> None:
+def resources(host=None, timeout=ssh.DEFAULT_TIMEOUT) -> None:
     """Resource detail: CPU/load, memory and disk with absolute values."""
     config = _load_config()
     selected = _require_ssh(_select_hosts(config, host))
     if not selected:
-        raise typer.Exit(0)
+        raise Exit(0)
     metrics = _probe_all(selected, lambda a: probe_system(a, timeout=timeout))
 
     console.print()
@@ -600,16 +612,12 @@ def resources(
         _print_host_card(h.display, table)
 
 
-@app.command()
-def security(
-    host: str = typer.Argument(None, help="Specific host (default: all)."),
-    timeout: int = typer.Option(ssh.DEFAULT_TIMEOUT, help="SSH timeout per host (s)."),
-) -> None:
+def security(host=None, timeout=ssh.DEFAULT_TIMEOUT) -> None:
     """Security audit: logins, failures, ports, fail2ban and updates."""
     config = _load_config()
     selected = _require_ssh(_select_hosts(config, host))
     if not selected:
-        raise typer.Exit(0)
+        raise Exit(0)
     metrics = _probe_all(selected, lambda a: probe_security(a, timeout=timeout))
 
     console.print()
@@ -951,18 +959,7 @@ def _cost_panel(host: Host, config: Config, today: date, lc: _Lifecycle) -> Grou
     return card(brand(host.display), table)
 
 
-@app.command()
-def cost(
-    host: str = typer.Argument(
-        None, help="Specific host → detailed panel (default: table of all)."
-    ),
-    offline: bool = typer.Option(
-        False, "--offline", help="Don't query the network (RDAP/API); use the config only."
-    ),
-    timeout: int = typer.Option(
-        rdap.DEFAULT_TIMEOUT, help="Network query timeout — RDAP and API (s)."
-    ),
-) -> None:
+def cost(host=None, offline=False, timeout=rdap.DEFAULT_TIMEOUT) -> None:
     """Cost & lifecycle: hosting, server renewal and domain expiry.
 
     With a saved token it **discovers the account's servers** automatically — the config
@@ -992,14 +989,14 @@ def cost(
         )
         for note in notes:
             console.print(f"[dim yellow]{note}[/]")
-        raise typer.Exit(0)
+        raise Exit(0)
 
     if host:
         row = _find_row(rows, host)
         if row is None:
             known = ", ".join(sorted(h.display for h, _ in rows)) or "(none)"
             err_console.print(f"[bold red]host '{host}' not found.[/] Known: {known}")
-            raise typer.Exit(2)
+            raise Exit(2)
         console.print()
         console.print(_cost_panel(row[0], config, today, row[1]))
     else:
@@ -1178,15 +1175,7 @@ def _billing_panel(
     return card(brand(prov.capitalize()), table)
 
 
-@app.command()
-def billing(
-    offline: bool = typer.Option(
-        False, "--offline", help="Don't query the API; show only the billing model."
-    ),
-    timeout: int = typer.Option(
-        rdap.DEFAULT_TIMEOUT, help="Provider API query timeout (s)."
-    ),
-) -> None:
+def billing(offline=False, timeout=rdap.DEFAULT_TIMEOUT) -> None:
     """Balance, credit and next charge per provider.
 
     For prepaid providers (e.g. Vultr) it shows credit, pending usage and the
@@ -1217,7 +1206,7 @@ def billing(
         )
         for note in notes:
             console.print(f"[dim yellow]{note}[/]")
-        raise typer.Exit(0)
+        raise Exit(0)
 
     console.print()
     for prov in providers_seen:
@@ -1503,7 +1492,7 @@ def _parse_interval(value: str) -> int:
             return max(1, int(float(s[:-1]) * units[s[-1]]))
         return max(1, int(float(s)))
     except ValueError as exc:
-        raise typer.BadParameter(f"invalid interval '{value}' (try 30m, 6h, 1d)") from exc
+        raise BadParameter(f"invalid interval '{value}' (try 30m, 6h, 1d)") from exc
 
 
 def _probe_reachability(
@@ -1577,18 +1566,7 @@ def _check_once(notify_: bool, timeout: int) -> int:
     return len(alerts)
 
 
-@app.command()
-def check(
-    notify_: bool = typer.Option(
-        False, "--notify", help="Push the alerts to your configured channel(s)."
-    ),
-    watch: str = typer.Option(
-        "", "--watch", "-w", help="Re-run on an interval (e.g. 30m, 6h, 1d) instead of once."
-    ),
-    timeout: int = typer.Option(
-        rdap.DEFAULT_TIMEOUT, help="Network/SSH query timeout (s)."
-    ),
-) -> None:
+def check(notify_=False, watch='', timeout=rdap.DEFAULT_TIMEOUT) -> None:
     """Triage: show only what needs attention; exit non-zero if anything does.
 
     Flags a bonus/credit about to run out (and the card charges that follow), upcoming
@@ -1605,7 +1583,7 @@ def check(
             _check_once(notify_, timeout)
             console.print(indent(meta(f"next check in {watch}")))
             time.sleep(every)
-    raise typer.Exit(1 if _check_once(notify_, timeout) else 0)
+    raise Exit(1 if _check_once(notify_, timeout) else 0)
 
 
 # --- setup: guided config for alerts & notifications -------------------------
@@ -1686,26 +1664,26 @@ def _setup_ntfy_channel(config: Config) -> dict:
     """Ask for an ntfy topic (generating a hard-to-guess default)."""
     default_topic = config.ntfy or f"https://ntfy.sh/vordr-{pysecrets.token_hex(4)}"
     console.print(indent(meta("ntfy: install the ntfy app and subscribe to this topic")))
-    return {"ntfy": typer.prompt("  ntfy URL/topic", default=default_topic).strip()}
+    return {"ntfy": prompt("  ntfy URL/topic", default=default_topic).strip()}
 
 
 def _setup_email_channel() -> dict:
     """Validate a Gmail address + app password (SMTP login), store the password, keep the email."""
     console.print(indent(meta("gmail app password (2FA required): "
                               "myaccount.google.com/apppasswords")))
-    addr = typer.prompt("  your gmail address").strip()
+    addr = prompt("  your gmail address").strip()
     # Google shows the app password grouped with spaces; the real value has none
-    password = "".join(typer.prompt("  gmail app password (16 chars)", hide_input=True).split())
+    password = "".join(prompt("  gmail app password (16 chars)", hide_input=True).split())
     if not addr or not password:
         err_console.print("[red]address and app password are required.[/]")
-        raise typer.Exit(1)
+        raise Exit(1)
     target = notify.EmailTarget(host="smtp.gmail.com", port=587, user=addr,
                                 password=password, to=addr)
     try:
         notify.email_validate(target, timeout=20)
     except notify.NotifyError as exc:
         err_console.print(f"[red]login failed:[/] {exc}")
-        raise typer.Exit(1) from exc
+        raise Exit(1) from exc
     console.print(f"[green]✔[/] smtp login OK for [bold]{addr}[/]")
     secrets.set_token("email", password)
     return {"email": addr}
@@ -1762,9 +1740,9 @@ def _setup_telegram_channel() -> dict:
     """Store the bot token, then auto-detect the chat id from a message to the bot."""
     console.print(indent(meta("create a bot: open @BotFather → /newbot → copy the token")))
     if not _store_token_flow("telegram"):
-        raise typer.Exit(1)
+        raise Exit(1)
     token = secrets.get_token("telegram")
-    typer.prompt("  now send any message to your bot, then press enter here",
+    prompt("  now send any message to your bot, then press enter here",
                  default="", show_default=False)
     chat: str | None = None
     try:
@@ -1772,12 +1750,11 @@ def _setup_telegram_channel() -> dict:
     except notify.NotifyError as exc:
         err_console.print(f"[yellow]{exc}[/]")
     if not chat:
-        chat = typer.prompt("  couldn't detect it — paste your chat id").strip()
+        chat = prompt("  couldn't detect it — paste your chat id").strip()
     console.print(indent(meta(f"linked chat {chat}")))
     return {"telegram_chat": chat}
 
 
-@app.command()
 def setup() -> None:
     """Guided setup for alerts & notifications — type a value, press enter, done.
 
@@ -1790,7 +1767,7 @@ def setup() -> None:
             "[yellow]setup needs a terminal.[/] Edit [bold][alerts]/[notify][/] in the "
             "config (see examples/config.example.toml)."
         )
-        raise typer.Exit(1)
+        raise Exit(1)
 
     config = _load_config(require_hosts=False)
     path = config_path()
@@ -1803,30 +1780,30 @@ def setup() -> None:
     existing = _configured_channels(config)
     if existing:
         console.print(indent(meta(f"already configured: {', '.join(existing)}")))
-        pick = typer.prompt(
+        pick = prompt(
             "  press enter to keep, or name a channel to add/change [telegram/email/ntfy]",
             default="keep", show_default=False,
         )
     else:
         console.print(indent(meta("where should alerts go?  run setup again to add more")))
-        pick = typer.prompt("  channel [telegram/email/ntfy]", default="telegram")
+        pick = prompt("  channel [telegram/email/ntfy]", default="telegram")
 
     name = _resolve_channel(pick)
     test_target: str | None = None
     if name and name in existing:
         # an already-wired channel: offer a test of just this one, or an explicit reconfigure
-        if typer.confirm(f"  {name} is already set up — send it a test now?", default=True):
+        if confirm(f"  {name} is already set up — send it a test now?", default=True):
             test_target = name
-        elif typer.confirm(f"  reconfigure {name} instead?", default=False):
+        elif confirm(f"  reconfigure {name} instead?", default=False):
             notify_section.update(_setup_channel(name, config))
             test_target = name
     elif name:
         notify_section.update(_setup_channel(name, config))   # new channel — verify w/ `vordr test`
 
     # 2. thresholds
-    runway = typer.prompt("  warn when a bonus/credit runs out within N days",
+    runway = prompt("  warn when a bonus/credit runs out within N days",
                           default=config.runway_days)
-    charge = typer.prompt("  warn when a charge/renewal/expiry is within N days",
+    charge = prompt("  warn when a charge/renewal/expiry is within N days",
                           default=config.charge_days)
 
     _upsert_sections(path, {
@@ -1847,7 +1824,7 @@ def setup() -> None:
     vordr_bin = shutil.which("vordr")
     scheduled = False
     if vordr_bin and shutil.which("systemctl"):
-        if typer.confirm("  schedule a daily check? (per-user systemd timer, reversible)",
+        if confirm("  schedule a daily check? (per-user systemd timer, reversible)",
                          default=True):
             scheduled = _install_user_timer(vordr_bin)
             if scheduled:
@@ -1859,7 +1836,6 @@ def setup() -> None:
     console.print()
 
 
-@app.command("test")
 def test_notify() -> None:
     """Send a sample alert through every configured channel — to verify the look and wiring.
 
@@ -1875,24 +1851,99 @@ def test_notify() -> None:
     console.print()
 
 
-def _version_callback(value: bool) -> None:
-    if value:
+def main(argv: list[str] | None = None) -> int:
+    """Vordr stands guard over your servers. Parse argv, dispatch, return an exit code."""
+    parser = argparse.ArgumentParser(
+        prog="vordr",
+        description="Vordr — the warden of your servers. Watches status, resources, "
+        "cost/expiry and security of your hosts over SSH.",
+    )
+    parser.add_argument("-V", "--version", action="store_true",
+                        help="Show the version and exit.")
+    sub = parser.add_subparsers(dest="cmd", metavar="<command>")
+
+    sub.add_parser("hosts", help="List the configured hosts.").set_defaults(
+        func=lambda a: hosts())
+
+    p = sub.add_parser("init", help="Create the config (a wizard in a terminal).")
+    p.add_argument("-f", "--force", action="store_true", help="Overwrite an existing config.")
+    p.set_defaults(func=lambda a: init(a.force))
+
+    p = sub.add_parser("status", help="Status board: state, uptime, load, RAM, disk.")
+    p.add_argument("host", nargs="?", default=None, help="Specific host (default: all).")
+    p.add_argument("--raw", action="store_true", help="Show the native status_command output.")
+    p.add_argument("-w", "--watch", type=float, default=0.0,
+                   help="Refresh every N seconds (0 = once).")
+    p.add_argument("--timeout", type=int, default=ssh.DEFAULT_TIMEOUT,
+                   help="SSH timeout per host (s).")
+    p.set_defaults(func=lambda a: status(a.host, a.raw, a.watch, a.timeout))
+
+    for name, helptext in (("resources", "CPU/load, memory and disk in detail."),
+                           ("security", "Security audit over SSH.")):
+        p = sub.add_parser(name, help=helptext)
+        p.add_argument("host", nargs="?", default=None, help="Specific host (default: all).")
+        p.add_argument("--timeout", type=int, default=ssh.DEFAULT_TIMEOUT,
+                       help="SSH timeout per host (s).")
+        p.set_defaults(func=(lambda fn: lambda a: fn(a.host, a.timeout))(
+            resources if name == "resources" else security))
+
+    p = sub.add_parser("cost", help="Cost & lifecycle: hosting, renewals, domain expiry.")
+    p.add_argument("host", nargs="?", default=None, help="Specific host → detailed panel.")
+    p.add_argument("--offline", action="store_true", help="Don't query the network; config only.")
+    p.add_argument("--timeout", type=int, default=rdap.DEFAULT_TIMEOUT, help="Network timeout (s).")
+    p.set_defaults(func=lambda a: cost(a.host, a.offline, a.timeout))
+
+    p = sub.add_parser("billing", help="Balance, credit and next charge per provider.")
+    p.add_argument("--offline", action="store_true", help="Don't query the API.")
+    p.add_argument("--timeout", type=int, default=rdap.DEFAULT_TIMEOUT, help="API timeout (s).")
+    p.set_defaults(func=lambda a: billing(a.offline, a.timeout))
+
+    p = sub.add_parser("check", help="Triage: only what needs attention (for cron).")
+    p.add_argument("--notify", dest="notify_", action="store_true",
+                   help="Push the alerts to your configured channel(s).")
+    p.add_argument("-w", "--watch", default="", help="Re-run on an interval (30m, 6h, 1d).")
+    p.add_argument("--timeout", type=int, default=rdap.DEFAULT_TIMEOUT,
+                   help="Network/SSH timeout (s).")
+    p.set_defaults(func=lambda a: check(a.notify_, a.watch, a.timeout))
+
+    sub.add_parser("setup", help="Guided setup for alerts & notifications.").set_defaults(
+        func=lambda a: setup())
+    sub.add_parser("test", help="Send a sample alert to your channels.").set_defaults(
+        func=lambda a: test_notify())
+
+    sp = sub.add_parser("secret", help="Manage provider API tokens (stored outside the repo).")
+    ssub = sp.add_subparsers(dest="subcmd", metavar="<command>")
+    q = ssub.add_parser("set", help="Save (and validate) a provider's API token.")
+    q.add_argument("provider", help=f"One of: {', '.join(secrets.ENV_VARS)}.")
+    q.set_defaults(func=lambda a: secret_set(a.provider))
+    q = ssub.add_parser("rm", help="Remove a provider's API token.")
+    q.add_argument("provider", help=f"One of: {', '.join(secrets.ENV_VARS)}.")
+    q.set_defaults(func=lambda a: secret_rm(a.provider))
+    ssub.add_parser("status", help="Show which providers have a token (masked).").set_defaults(
+        func=lambda a: secret_status())
+
+    args = parser.parse_args(argv)
+    if args.version:
         console.print(f"vordr {__version__}")
-        raise typer.Exit()
-
-
-@app.callback(invoke_without_command=True)
-def main(
-    ctx: typer.Context,
-    version: bool = typer.Option(
-        False, "--version", "-V", callback=_version_callback, is_eager=True,
-        help="Show the version and exit.",
-    ),
-) -> None:
-    """Vordr stands guard over your servers."""
-    if ctx.invoked_subcommand is None:
+        return 0
+    if not getattr(args, "cmd", None):
         _splash()
+        return 0
+    if getattr(args, "func", None) is None:      # a group with no subcommand (e.g. `secret`)
+        sp.print_help()
+        return 0
+    try:
+        args.func(args)
+    except BadParameter as exc:
+        err_console.print(f"[red]error:[/] {exc}")
+        return 2
+    except Exit as exc:
+        return exc.code
+    return 0
+
+
+app = main  # the test harness invokes `cli.app(argv)`
 
 
 if __name__ == "__main__":  # pragma: no cover
-    app()
+    sys.exit(main())

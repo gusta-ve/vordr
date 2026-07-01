@@ -3,6 +3,18 @@
 All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.0.0]
+
+Vordr is now **dependency-free** — pure Python standard library, nothing pulled at install.
+
+### Changed
+- **Dropped Typer and Rich.** The CLI is now `argparse`, and the styled output — tables,
+  cards, colour thresholds and the full-screen `--watch` view — is a small in-house ANSI
+  console (`src/vordr/ui.py`). `pipx install vordr` installs *only* vordr, no transitive
+  dependencies. Commands, flags, output and behaviour are unchanged.
+- The console-script entry point moved from `vordr.cli:app` to `vordr.cli:main`. Running the
+  installed `vordr` command is unaffected; only code importing the old Typer `app` would be.
+
 ## [1.2.1]
 
 ### Changed

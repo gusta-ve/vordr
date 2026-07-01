@@ -22,8 +22,8 @@ the questions that matter day to day:
 - **Are they secure?** — failed logins, listening ports, fail2ban, pending updates and
   reboot-required.
 
-No agents installed on the servers, no database, no secrets in the code: Vordr only
-needs your `~/.ssh/config`.
+No agents installed on the servers, no database, no secrets in the code and **no
+third-party dependencies** (pure standard library): Vordr only needs your `~/.ssh/config`.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -282,10 +282,15 @@ suits you:
 | Secrets          | `src/vordr/secrets.py` | Tokens outside the repo (env > chmod-600 file). |
 | Alerts / push    | `src/vordr/notify.py`  | `vordr check` push channels (Telegram/email/ntfy).|
 | Formatting       | `src/vordr/format.py`  | Pure functions (uptime, bytes, color thresholds).|
-| CLI              | `src/vordr/cli.py`     | Typer + Rich; orchestrates everything in parallel.|
+| Console UI       | `src/vordr/ui.py`      | A tiny stdlib ANSI console — styles, tables, cards.|
+| CLI              | `src/vordr/cli.py`     | `argparse`; orchestrates everything in parallel.  |
 
 Hosts are queried **in parallel** (`ThreadPoolExecutor`), so watching 2 or 10 servers
 takes essentially the same time.
+
+**No third-party dependencies.** Vordr runs on the Python standard library alone — the CLI
+is `argparse`, and the styled tables/cards are a small in-house ANSI console (`ui.py`),
+not Rich. `pipx install vordr` pulls nothing else.
 
 ### Secure by design
 

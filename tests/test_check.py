@@ -1,7 +1,7 @@
 from datetime import date
 
 import pytest
-from typer.testing import CliRunner
+from clihelper import CliRunner
 
 from vordr import cli
 from vordr.config import Config, Host, Subscription

@@ -21,10 +21,8 @@ classifiers = [
     "Topic :: System :: Monitoring",
     "Topic :: System :: Systems Administration",
 ]
-dependencies = [
-    "typer>=0.12",
-    "rich>=13.7",
-]
+# No runtime dependencies — Vordr runs on the Python standard library alone.
+dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.5"]
@@ -35,7 +33,7 @@ Repository = "https://github.com/gusta-ve/vordr"
 Issues = "https://github.com/gusta-ve/vordr/issues"
 
 [project.scripts]
-vordr = "vordr.cli:app"
+vordr = "vordr.cli:main"
 
 [tool.hatch.version]
 path = "src/vordr/__init__.py"
@@ -56,5 +54,5 @@ select = ["E", "F", "I", "UP", "B", "W"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "tests"]
 addopts = "-q"
