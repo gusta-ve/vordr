@@ -3,6 +3,16 @@
 All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.1.0]
+
+### Changed
+- **Notifications went terminal-log dark.** The push dropped the emoji dots for bracket
+  severity tags — `[!!]` critical, `[!]` attention, `[+]` recovered — one clean line per
+  alert (`[tag] host · detail`) under a plain `vordr · …` summary. Reads like a log, fits
+  the tool's aesthetic.
+- **Refreshed the README hero.** It now shows two faux-terminals: the `vordr status` board
+  and a `vordr check` notification rendered in the real bracket-tag layout.
+
 ## [1.0.0]
 
 The first stable release. Vordr now answers the three day-to-day questions about your

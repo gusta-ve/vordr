@@ -1287,18 +1287,18 @@ def _evaluate_alerts(
 
 
 def _push_mark(a: _Alert) -> str:
-    """Body marker for a push (no color there, so a dot carries the severity).
+    """Severity tag for a push, terminal-log style (no color there to carry it).
 
-    🟢 recovery (tier 0), 🔴 critical, 🟡 otherwise — mirroring the terminal's
-    green/red/yellow thresholds.
+    ``[+]`` recovery (tier 0), ``[!!]`` critical, ``[!]`` otherwise — more bangs, more
+    urgent; ``[+]`` is the good-news marker.
     """
     if a.tier == 0:
-        return "🟢"
-    return "🔴" if a.crit else "🟡"
+        return "[+]"
+    return "[!!]" if a.crit else "[!]"
 
 
 def _push_title(alerts: list[_Alert]) -> str:
-    """A one-line headline summarising the push, e.g. ``🐺 vordr · 1 critical · 1 recovered``."""
+    """A one-line headline summarising the push, e.g. ``vordr · 1 critical · 1 recovered``."""
     crit = sum(1 for a in alerts if a.tier > 0 and a.crit)
     warn = sum(1 for a in alerts if a.tier > 0 and not a.crit)
     rec = sum(1 for a in alerts if a.tier == 0)
@@ -1309,7 +1309,7 @@ def _push_title(alerts: list[_Alert]) -> str:
         parts.append(f"{warn} alert" + ("s" if warn > 1 else ""))
     if rec:
         parts.append(f"{rec} recovered")
-    return f"🐺 vordr · {' · '.join(parts) or 'update'}"
+    return f"vordr · {' · '.join(parts) or 'update'}"
 
 
 def _telegram_creds(config: Config) -> tuple[str | None, str | None] | None:
@@ -1332,8 +1332,11 @@ def _email_creds(config: Config) -> notify.EmailTarget | None:
 
 
 def _push_body(alerts: list[_Alert]) -> str:
-    """The notification body — one dot-marked line per alert (shared by real and test pushes)."""
-    return "\n".join(f"{_push_mark(a)} {a.who} — {a.text}" for a in alerts)
+    """The notification body — one tagged line per alert (shared by real and test pushes).
+
+    ``[tag]`` is left-padded to width 4 so the host column lines up in a monospace view.
+    """
+    return "\n".join(f"{_push_mark(a):<4} {a.who} · {a.text}" for a in alerts)
 
 
 def _push_alerts(alerts: list[_Alert], config: Config) -> None:
@@ -1369,7 +1372,7 @@ def _send_test(config: Config, *, only: str | None = None) -> None:
     if not chans:
         err_console.print("[yellow]no channel to test — run `vordr setup` first.[/]")
         return
-    title = "🐺 vordr · test notification"
+    title = "vordr · test notification"
     body = _push_body(_sample_alerts())
     try:
         sent = notify.send(

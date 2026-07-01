@@ -228,15 +228,15 @@ fires on each alert):
 - **ntfy** — no account, just a topic; set `[notify] ntfy = "https://ntfy.sh/<topic>"`
   (or `VORDR_NTFY_URL`). Needs the ntfy app (or a browser tab) subscribed to the topic.
 
-A push reads at a glance — a one-line summary, then a colored dot per item (🔴 critical,
-🟡 attention, 🟢 recovered) mirroring the terminal's thresholds:
+A push reads at a glance — a one-line summary, then a terminal-log line per item, tagged by
+severity (`[!!]` critical, `[!]` attention, `[+]` recovered):
 
 ```
-🐺 vordr · 1 critical · 1 alert · 1 recovered
+vordr · 1 critical · 1 alert · 1 recovered
 
-🔴 db — domain EXPIRED (2026-06-28)
-🟡 Hetzner — charge in 6d (≈ EUR 4.99, 2026-07-01)
-🟢 web — back online
+[!!] db · domain EXPIRED (2026-06-28)
+[!]  Hetzner · charge in 6d (≈ EUR 4.99, 2026-07-01)
+[+]  web · back online
 ```
 
 Run `vordr test` anytime to push a sample alert in this exact layout to every configured

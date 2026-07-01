@@ -129,7 +129,7 @@ def test_setup_test_existing_channel_skips_token_reentry(monkeypatch, tmp_path):
     assert result.exit_code == 0
     assert "already configured: telegram" in result.stdout
     assert "API token" not in result.stdout                     # never re-asked the token
-    assert sent.get("title") == "🐺 vordr · test notification"  # tested the kept creds
+    assert sent.get("title") == "vordr · test notification"     # tested the kept creds
 
 
 def test_setup_keep_leaves_channels_untouched(monkeypatch, tmp_path):
@@ -167,9 +167,9 @@ def test_test_command_pushes_sample(monkeypatch, tmp_path):
     monkeypatch.setattr(cli.notify, "send", fake_send)
     result = runner.invoke(cli.app, ["test"])
     assert result.exit_code == 0
-    assert captured["title"] == "🐺 vordr · test notification"
-    # the body shows the real layout — a colored dot per item
-    assert "🔴" in captured["body"] and "🟡" in captured["body"] and "🟢" in captured["body"]
+    assert captured["title"] == "vordr · test notification"
+    # the body shows the real layout — a bracket-tag per item
+    assert "[!!]" in captured["body"] and "[!]" in captured["body"] and "[+]" in captured["body"]
 
 
 def test_merge_notes_dedups_preserving_order():
